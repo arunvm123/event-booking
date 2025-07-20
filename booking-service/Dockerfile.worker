@@ -1,0 +1,51 @@
+# Multi-stage build for Booking Service Worker
+FROM golang:1.22-alpine AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Install git for dependencies
+RUN apk add --no-cache git
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the worker binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o booking-service-worker ./cmd/worker
+
+# Final stage - minimal image
+FROM alpine:latest
+
+# Install ca-certificates for HTTPS requests
+RUN apk --no-cache add ca-certificates tzdata
+
+# Create non-root user
+RUN adduser -D -s /bin/sh bookinguser
+
+WORKDIR /app
+
+# Copy binary from builder stage
+COPY --from=builder /app/booking-service-worker .
+COPY --from=builder /app/config.yaml .
+
+# Change ownership to non-root user
+RUN chown -R bookinguser:bookinguser /app
+
+# Switch to non-root user
+USER bookinguser
+
+# Health check for worker (checks if process is running)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD pgrep booking-service-worker || exit 1
+
+# Set environment variable for worker mode
+ENV SERVICE_MODE=worker
+
+# Run the worker
+CMD ["./booking-service-worker"]
