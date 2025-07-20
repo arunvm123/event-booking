@@ -17,6 +17,23 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - eventbooking-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: eventbooking-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - eventbooking-network
 
   user-service:
     build:
@@ -31,13 +48,49 @@ services:
       DB_HOST: "postgres"
       DB_PORT: "5432"
       DB_SSL_MODE: "disable"
-      JWT_SECRET: "your-secret-key-change-in-production"
+      JWT_SECRET: "shared-jwt-secret-change-in-production"
     ports:
       - "8081:8081"
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - eventbooking-network
+
+  event-service:
+    build:
+      context: .
+      dockerfile: event-service/Dockerfile
+    container_name: eventbooking-event-service
+    environment:
+      PORT: "8082"
+      DB_USER: "postgres"
+      DB_PASSWORD: "password"
+      DB_NAME: "eventbooking"
+      DB_HOST: "postgres"
+      DB_PORT: "5432"
+      DB_SSL_MODE: "disable"
+      JWT_SECRET: "shared-jwt-secret-change-in-production"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
+      REDIS_DB: "0"
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - eventbooking-network
 
 volumes:
   postgres_data:
+  redis_data:
+
+networks:
+  eventbooking-network:
+    driver: bridge
