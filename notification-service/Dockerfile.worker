@@ -1,0 +1,48 @@
+# Multi-stage build for Notification Service Worker
+FROM golang:1.22-alpine AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Install git for dependencies
+RUN apk add --no-cache git
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the worker binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o notification-service-worker ./cmd/worker
+
+# Final stage - minimal image
+FROM alpine:latest
+
+# Install ca-certificates for HTTPS requests
+RUN apk --no-cache add ca-certificates tzdata
+
+# Create non-root user
+RUN adduser -D -s /bin/sh notificationuser
+
+WORKDIR /app
+
+# Copy binary from builder stage
+COPY --from=builder /app/notification-service-worker .
+COPY --from=builder /app/config.yaml .
+
+# Change ownership to non-root user
+RUN chown -R notificationuser:notificationuser /app
+
+# Switch to non-root user
+USER notificationuser
+
+# Health check for worker (checks if process is running)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD pgrep notification-service-worker || exit 1
+
+# Run the worker
+CMD ["./notification-service-worker"]

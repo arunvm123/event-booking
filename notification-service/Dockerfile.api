@@ -1,0 +1,51 @@
+# Multi-stage build for Notification Service API
+FROM golang:1.22-alpine AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Install git for dependencies
+RUN apk add --no-cache git
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the API binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o notification-service-api .
+
+# Final stage - minimal image
+FROM alpine:latest
+
+# Install ca-certificates for HTTPS requests
+RUN apk --no-cache add ca-certificates tzdata
+
+# Create non-root user
+RUN adduser -D -s /bin/sh notificationuser
+
+WORKDIR /app
+
+# Copy binary from builder stage
+COPY --from=builder /app/notification-service-api .
+COPY --from=builder /app/config.yaml .
+
+# Change ownership to non-root user
+RUN chown -R notificationuser:notificationuser /app
+
+# Switch to non-root user
+USER notificationuser
+
+# Expose port
+EXPOSE 8084
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8084/health || exit 1
+
+# Run the API
+CMD ["./notification-service-api"]
