@@ -3,8 +3,7 @@ package model
 import (
 	"time"
 
-	"github.com/google/uuid"
-	"gorm.io/gorm"
+	"github.com/lib/pq"
 )
 
 // ===============================
@@ -13,8 +12,8 @@ import (
 
 // Event represents the event entity in the database
 type Event struct {
-	ID           uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
-	Name         string    `gorm:"not null"`
+	ID           string `gorm:"type:text;primary_key"`
+	Name         string `gorm:"not null"`
 	Description  string
 	Venue        string    `gorm:"not null"`
 	City         string    `gorm:"not null"`
@@ -22,18 +21,18 @@ type Event struct {
 	EventDate    time.Time `gorm:"not null"`
 	TotalSeats   int       `gorm:"not null"`
 	PricePerSeat float64   `gorm:"not null"`
-	CreatedBy    uuid.UUID `gorm:"not null"` // User ID from User Service
+	CreatedBy    string    `gorm:"type:text;not null"` // User ID from User Service
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
 
 // Seat represents the seat entity in the database
 type Seat struct {
-	ID         uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
-	EventID    uuid.UUID `gorm:"not null"`
-	SeatNumber string    `gorm:"not null"`
-	Status     string    `gorm:"default:'available'"` // available, held, booked
-	HoldID     *uuid.UUID
+	ID         string  `gorm:"type:text;primary_key"`
+	EventID    string  `gorm:"type:text;not null"`
+	SeatNumber string  `gorm:"not null"`
+	Status     string  `gorm:"default:'available'"` // available, held, booked
+	HoldID     *string `gorm:"type:text"`
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 
@@ -42,38 +41,16 @@ type Seat struct {
 
 // Hold represents the hold entity in the database
 type Hold struct {
-	ID          uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
-	UserID      uuid.UUID `gorm:"not null"` // User ID from User Service
-	EventID     uuid.UUID `gorm:"not null"`
-	SeatNumbers []string  `gorm:"type:text[]"`
-	ExpiresAt   time.Time `gorm:"not null"`
-	Status      string    `gorm:"default:'active'"` // active, confirmed, expired
+	ID          string         `gorm:"type:text;primary_key"`
+	UserID      string         `gorm:"type:text;not null"` // User ID from User Service
+	EventID     string         `gorm:"type:text;not null"`
+	SeatNumbers pq.StringArray `gorm:"type:text[]"`
+	ExpiresAt   time.Time      `gorm:"not null"`
+	Status      string         `gorm:"default:'active'"` // active, confirmed, expired
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 
 	Event Event `gorm:"foreignKey:EventID"`
-}
-
-// BeforeCreate hooks
-func (e *Event) BeforeCreate(tx *gorm.DB) error {
-	if e.ID == uuid.Nil {
-		e.ID = uuid.New()
-	}
-	return nil
-}
-
-func (s *Seat) BeforeCreate(tx *gorm.DB) error {
-	if s.ID == uuid.Nil {
-		s.ID = uuid.New()
-	}
-	return nil
-}
-
-func (h *Hold) BeforeCreate(tx *gorm.DB) error {
-	if h.ID == uuid.Nil {
-		h.ID = uuid.New()
-	}
-	return nil
 }
 
 // Conversion methods to API DTOs
@@ -110,6 +87,7 @@ func (h *Hold) ToHoldResponse(totalPrice float64) *HoldResponse {
 
 // CreateEventRequest represents input for creating an event in repository layer
 type CreateEventRequest struct {
+	ID           string
 	Name         string
 	Description  string
 	Venue        string
@@ -118,12 +96,12 @@ type CreateEventRequest struct {
 	EventDate    time.Time
 	TotalSeats   int
 	PricePerSeat float64
-	CreatedBy    uuid.UUID
+	CreatedBy    string
 }
 
 // UpdateEventRequest represents input for updating an event in repository layer
 type UpdateEventRequest struct {
-	ID           uuid.UUID
+	ID           string
 	Name         string
 	Description  string
 	Venue        string
@@ -147,8 +125,9 @@ type EventFilter struct {
 
 // CreateHoldRequest represents input for creating a hold in repository layer
 type CreateHoldRequest struct {
-	UserID      uuid.UUID
-	EventID     uuid.UUID
+	ID          string
+	UserID      string
+	EventID     string
 	SeatNumbers []string
 	ExpiresAt   time.Time
 }
@@ -170,7 +149,7 @@ type CreateEventAPIRequest struct {
 }
 
 // ToCreateEventRequest converts API request to repository request
-func (r *CreateEventAPIRequest) ToCreateEventRequest(userID uuid.UUID) CreateEventRequest {
+func (r *CreateEventAPIRequest) ToCreateEventRequest(userID string) CreateEventRequest {
 	return CreateEventRequest{
 		Name:         r.Name,
 		Description:  r.Description,
@@ -190,7 +169,7 @@ type HoldSeatsRequest struct {
 }
 
 // ToCreateHoldRequest converts API request to repository request
-func (r *HoldSeatsRequest) ToCreateHoldRequest(userID, eventID uuid.UUID, expiresAt time.Time) CreateHoldRequest {
+func (r *HoldSeatsRequest) ToCreateHoldRequest(userID, eventID string, expiresAt time.Time) CreateHoldRequest {
 	return CreateHoldRequest{
 		UserID:      userID,
 		EventID:     eventID,
@@ -201,7 +180,7 @@ func (r *HoldSeatsRequest) ToCreateHoldRequest(userID, eventID uuid.UUID, expire
 
 // EventResponse represents event data in API responses
 type EventResponse struct {
-	EventID              uuid.UUID `json:"event_id"`
+	EventID              string    `json:"event_id"`
 	Name                 string    `json:"name"`
 	Description          string    `json:"description,omitempty"`
 	Venue                string    `json:"venue"`
@@ -213,7 +192,7 @@ type EventResponse struct {
 	PricePerSeat         float64   `json:"price_per_seat"`
 	AvailableSeatNumbers []string  `json:"available_seat_numbers,omitempty"` // Only in detail view
 	CreatedAt            time.Time `json:"created_at"`
-	CreatedBy            uuid.UUID `json:"created_by"`
+	CreatedBy            string    `json:"created_by"`
 }
 
 // EventListResponse represents the response for listing events
@@ -232,8 +211,8 @@ type Pagination struct {
 
 // HoldResponse represents the response for seat hold operations
 type HoldResponse struct {
-	HoldID     uuid.UUID `json:"hold_id"`
-	EventID    uuid.UUID `json:"event_id"`
+	HoldID     string    `json:"hold_id"`
+	EventID    string    `json:"event_id"`
 	HeldSeats  []string  `json:"held_seats"`
 	ExpiresAt  time.Time `json:"expires_at"`
 	TotalPrice float64   `json:"total_price"`
@@ -257,4 +236,18 @@ type HealthResponse struct {
 	Status    string    `json:"status"`
 	Service   string    `json:"service"`
 	Timestamp time.Time `json:"timestamp"`
+}
+
+// HoldDetailsResponse represents hold details for external services
+type HoldDetailsResponse struct {
+	HoldID     string    `json:"hold_id"`
+	UserID     string    `json:"user_id"`
+	UserName   string    `json:"user_name,omitempty"` // Optional, requires user service lookup
+	EventID    string    `json:"event_id"`
+	EventName  string    `json:"event_name"`
+	Venue      string    `json:"venue"`
+	EventDate  time.Time `json:"event_date"`
+	Seats      []string  `json:"seats"`
+	TotalPrice float64   `json:"total_price"`
+	ExpiresAt  time.Time `json:"expires_at"`
 }

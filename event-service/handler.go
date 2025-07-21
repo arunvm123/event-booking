@@ -41,12 +41,12 @@ func (h *EventHandler) CreateEvent(c *gin.Context) {
 	if !exists {
 		c.JSON(http.StatusUnauthorized, model.ErrorResponse{
 			Error:   "unauthorized",
-			Message: "User ID not found in token",
+			Message: "User ID not found in token AAA",
 		})
 		return
 	}
 
-	userUUID, ok := userID.(uuid.UUID)
+	userIDStr, ok := userID.(string)
 	if !ok {
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 			Error:   "internal_error",
@@ -55,8 +55,12 @@ func (h *EventHandler) CreateEvent(c *gin.Context) {
 		return
 	}
 
+	// Convert API request to repository request and generate UUID
+	createReq := req.ToCreateEventRequest(userIDStr)
+	createReq.ID = uuid.New().String()
+
 	// Create event
-	event, err := h.repo.CreateEvent(req.ToCreateEventRequest(userUUID))
+	event, err := h.repo.CreateEvent(createReq)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 			Error:   "internal_error",
@@ -80,15 +84,7 @@ func (h *EventHandler) CreateEvent(c *gin.Context) {
 
 // GetEvent handles retrieving a single event by ID
 func (h *EventHandler) GetEvent(c *gin.Context) {
-	eventIDStr := c.Param("id")
-	eventID, err := uuid.Parse(eventIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{
-			Error:   "invalid_id",
-			Message: "Invalid event ID format",
-		})
-		return
-	}
+	eventID := c.Param("id")
 
 	// Try to get event from cache first
 	event, err := h.cache.GetEvent(eventID)
@@ -235,15 +231,7 @@ func (h *EventHandler) ListEvents(c *gin.Context) {
 
 // HoldSeats handles seat holding requests
 func (h *EventHandler) HoldSeats(c *gin.Context) {
-	eventIDStr := c.Param("id")
-	eventID, err := uuid.Parse(eventIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{
-			Error:   "invalid_id",
-			Message: "Invalid event ID format",
-		})
-		return
-	}
+	eventID := c.Param("id")
 
 	var req model.HoldSeatsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -264,7 +252,7 @@ func (h *EventHandler) HoldSeats(c *gin.Context) {
 		return
 	}
 
-	userUUID, ok := userID.(uuid.UUID)
+	userIDStr, ok := userID.(string)
 	if !ok {
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 			Error:   "internal_error",
@@ -276,8 +264,12 @@ func (h *EventHandler) HoldSeats(c *gin.Context) {
 	// Hold expires in 15 minutes
 	expiresAt := time.Now().Add(15 * time.Minute)
 
+	// Convert to repository request and generate UUID
+	holdReq := req.ToCreateHoldRequest(userIDStr, eventID, expiresAt)
+	holdReq.ID = uuid.New().String()
+
 	// Create hold
-	hold, err := h.repo.CreateHold(req.ToCreateHoldRequest(userUUID, eventID, expiresAt))
+	hold, err := h.repo.CreateHold(holdReq)
 	if err != nil {
 		if err.Error() == "seats not available" {
 			c.JSON(http.StatusConflict, model.ErrorResponse{
@@ -315,15 +307,7 @@ func (h *EventHandler) HoldSeats(c *gin.Context) {
 
 // ReleaseHold handles releasing a seat hold
 func (h *EventHandler) ReleaseHold(c *gin.Context) {
-	holdIDStr := c.Param("holdId")
-	holdID, err := uuid.Parse(holdIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{
-			Error:   "invalid_id",
-			Message: "Invalid hold ID format",
-		})
-		return
-	}
+	holdID := c.Param("holdId")
 
 	// Get hold first to know which event to invalidate cache for
 	hold, err := h.repo.GetHoldByID(holdID)
@@ -358,17 +342,59 @@ func (h *EventHandler) ReleaseHold(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Hold released successfully"})
 }
 
-// ConfirmHold handles confirming a seat hold (booking)
-func (h *EventHandler) ConfirmHold(c *gin.Context) {
-	holdIDStr := c.Param("holdId")
-	holdID, err := uuid.Parse(holdIDStr)
+// GetHoldDetails handles retrieving hold details by ID
+func (h *EventHandler) GetHoldDetails(c *gin.Context) {
+	holdID := c.Param("holdId")
+
+	// Get hold details
+	hold, err := h.repo.GetHoldByID(holdID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{
-			Error:   "invalid_id",
-			Message: "Invalid hold ID format",
+		if err.Error() == "hold not found" {
+			c.JSON(http.StatusNotFound, model.ErrorResponse{
+				Error:   "not_found",
+				Message: "Hold not found",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to get hold details",
 		})
 		return
 	}
+
+	// Get event details for additional information
+	event, err := h.repo.GetEventByID(hold.EventID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
+			Error:   "internal_error",
+			Message: "Failed to get event details",
+		})
+		return
+	}
+
+	// Calculate total price
+	totalPrice := event.PricePerSeat * float64(len(hold.SeatNumbers))
+
+	// Create response
+	response := model.HoldDetailsResponse{
+		HoldID:     hold.ID,
+		UserID:     hold.UserID,
+		EventID:    hold.EventID,
+		EventName:  event.Name,
+		Venue:      event.Venue,
+		EventDate:  event.EventDate,
+		Seats:      hold.SeatNumbers,
+		TotalPrice: totalPrice,
+		ExpiresAt:  hold.ExpiresAt,
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// ConfirmHold handles confirming a seat hold (booking)
+func (h *EventHandler) ConfirmHold(c *gin.Context) {
+	holdID := c.Param("holdId")
 
 	// Get hold first to know which event to invalidate cache for
 	hold, err := h.repo.GetHoldByID(holdID)

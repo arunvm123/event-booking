@@ -2,9 +2,6 @@ package model
 
 import (
 	"time"
-
-	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // ===============================
@@ -13,21 +10,13 @@ import (
 
 // User represents the user entity in the database
 type User struct {
-	ID           uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
-	Email        string    `gorm:"uniqueIndex;not null"`
-	PasswordHash string    `gorm:"not null"`
-	FirstName    string    `gorm:"not null"`
-	LastName     string    `gorm:"not null"`
+	ID           string `gorm:"primary_key;default:gen_random_uuid()"`
+	Email        string `gorm:"uniqueIndex;not null"`
+	PasswordHash string `gorm:"not null"`
+	FirstName    string `gorm:"not null"`
+	LastName     string `gorm:"not null"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
-}
-
-// BeforeCreate hook to generate UUID if not provided
-func (u *User) BeforeCreate(tx *gorm.DB) error {
-	if u.ID == uuid.Nil {
-		u.ID = uuid.New()
-	}
-	return nil
 }
 
 // ToUserResponse converts database User to API response
@@ -47,6 +36,7 @@ func (u *User) ToUserResponse() *UserResponse {
 
 // CreateUserRequest represents input for creating a user in repository layer
 type CreateUserRequest struct {
+	ID        string
 	Email     string
 	Password  string // Plain text password (will be hashed in repository)
 	FirstName string
@@ -83,7 +73,7 @@ type LoginRequest struct {
 
 // UserResponse represents user data in API responses
 type UserResponse struct {
-	UserID    uuid.UUID `json:"user_id"`
+	UserID    string    `json:"user_id"`
 	Email     string    `json:"email"`
 	FirstName string    `json:"first_name"`
 	LastName  string    `json:"last_name"`

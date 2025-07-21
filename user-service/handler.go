@@ -7,6 +7,7 @@ import (
 	"github.com/arunvm123/eventbooking/user-service/model"
 	"github.com/arunvm123/eventbooking/user-service/repository"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type UserHandler struct {
@@ -32,8 +33,10 @@ func (h *UserHandler) RegisterUser(c *gin.Context) {
 		return
 	}
 
+	createUserParams := req.ToCreateUserRequest()
+	createUserParams.ID = uuid.New().String()
 	// Create user in database
-	user, err := h.repo.CreateUser(req.ToCreateUserRequest())
+	user, err := h.repo.CreateUser(createUserParams)
 	if err != nil {
 		if err.Error() == "email already exists" {
 			c.JSON(http.StatusBadRequest, model.ErrorResponse{

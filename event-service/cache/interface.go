@@ -4,27 +4,25 @@ import (
 	"time"
 
 	"github.com/arunvm123/eventbooking/event-service/model"
-	"github.com/google/uuid"
 )
 
-// CacheRepository defines the interface for caching operations
 type CacheRepository interface {
-	// Seat availability caching
-	GetAvailableSeats(eventID uuid.UUID) ([]string, error)
-	SetAvailableSeats(eventID uuid.UUID, seats []string, ttl time.Duration) error
-	InvalidateAvailableSeats(eventID uuid.UUID) error
+	// Available seat operations
+	GetAvailableSeats(eventID string) ([]string, error)
+	SetAvailableSeats(eventID string, seats []string, ttl time.Duration) error
+	InvalidateAvailableSeats(eventID string) error
 
-	// Seat count caching
-	GetAvailableSeatCount(eventID uuid.UUID) (int, error)
-	SetAvailableSeatCount(eventID uuid.UUID, count int, ttl time.Duration) error
-	InvalidateAvailableSeatCount(eventID uuid.UUID) error
+	// Available seat count operations
+	GetAvailableSeatCount(eventID string) (int, error)
+	SetAvailableSeatCount(eventID string, count int, ttl time.Duration) error
+	InvalidateAvailableSeatCount(eventID string) error
 
-	// Event details caching
-	GetEvent(eventID uuid.UUID) (*model.Event, error)
-	SetEvent(eventID uuid.UUID, event *model.Event, ttl time.Duration) error
-	InvalidateEvent(eventID uuid.UUID) error
+	// Event operations
+	GetEvent(eventID string) (*model.Event, error)
+	SetEvent(eventID string, event *model.Event, ttl time.Duration) error
+	InvalidateEvent(eventID string) error
 
-	// Event list caching with filters
+	// Event list operations
 	GetEventList(filterKey string) (*model.EventListResponse, error)
 	SetEventList(filterKey string, response *model.EventListResponse, ttl time.Duration) error
 	InvalidateEventList(pattern string) error
@@ -33,5 +31,5 @@ type CacheRepository interface {
 	Ping() error
 
 	// Cache invalidation patterns
-	InvalidateEventRelatedCache(eventID uuid.UUID) error
+	InvalidateEventRelatedCache(eventID string) error
 }

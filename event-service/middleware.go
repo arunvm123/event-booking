@@ -8,13 +8,12 @@ import (
 	"github.com/arunvm123/eventbooking/event-service/model"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 )
 
 // JWTClaims represents the JWT claims structure
 type JWTClaims struct {
-	UserID uuid.UUID `json:"user_id"`
-	Email  string    `json:"email"`
+	UserID string `json:"user_id"`
+	Email  string `json:"email"`
 	jwt.RegisteredClaims
 }
 
@@ -84,7 +83,7 @@ func AuthMiddleware(jwtService *JWTService) gin.HandlerFunc {
 		c.Set("user_email", claims.Email)
 
 		// Add X-User-ID header for downstream services
-		c.Header("X-User-ID", claims.UserID.String())
+		c.Header("X-User-ID", claims.UserID)
 
 		c.Next()
 	}

@@ -55,6 +55,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 	// Seat operations (authenticated users only)
 	protected.POST("/:id/hold", eventHandler.HoldSeats)
+	protected.GET("/holds/:holdId", eventHandler.GetHoldDetails)
 	protected.DELETE("/holds/:holdId", eventHandler.ReleaseHold)
 	protected.POST("/holds/:holdId/confirm", eventHandler.ConfirmHold)
 

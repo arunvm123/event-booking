@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/arunvm123/eventbooking/event-service/model"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -39,16 +38,16 @@ func NewRedisCacheRepository(redisURL, password string, db int) (*RedisCacheRepo
 }
 
 // Cache key generators
-func (r *RedisCacheRepository) availableSeatsKey(eventID uuid.UUID) string {
-	return fmt.Sprintf("event:%s:seats:available", eventID.String())
+func (r *RedisCacheRepository) availableSeatsKey(eventID string) string {
+	return fmt.Sprintf("event:%s:seats:available", eventID)
 }
 
-func (r *RedisCacheRepository) availableSeatCountKey(eventID uuid.UUID) string {
-	return fmt.Sprintf("event:%s:seats:count", eventID.String())
+func (r *RedisCacheRepository) availableSeatCountKey(eventID string) string {
+	return fmt.Sprintf("event:%s:seats:count", eventID)
 }
 
-func (r *RedisCacheRepository) eventKey(eventID uuid.UUID) string {
-	return fmt.Sprintf("event:%s:details", eventID.String())
+func (r *RedisCacheRepository) eventKey(eventID string) string {
+	return fmt.Sprintf("event:%s:details", eventID)
 }
 
 func (r *RedisCacheRepository) eventListKey(filterKey string) string {
@@ -56,7 +55,7 @@ func (r *RedisCacheRepository) eventListKey(filterKey string) string {
 }
 
 // Seat availability caching
-func (r *RedisCacheRepository) GetAvailableSeats(eventID uuid.UUID) ([]string, error) {
+func (r *RedisCacheRepository) GetAvailableSeats(eventID string) ([]string, error) {
 	key := r.availableSeatsKey(eventID)
 	seats, err := r.client.SMembers(r.ctx, key).Result()
 	if err != nil {
@@ -68,7 +67,7 @@ func (r *RedisCacheRepository) GetAvailableSeats(eventID uuid.UUID) ([]string, e
 	return seats, nil
 }
 
-func (r *RedisCacheRepository) SetAvailableSeats(eventID uuid.UUID, seats []string, ttl time.Duration) error {
+func (r *RedisCacheRepository) SetAvailableSeats(eventID string, seats []string, ttl time.Duration) error {
 	key := r.availableSeatsKey(eventID)
 
 	// Clear existing set
@@ -91,13 +90,13 @@ func (r *RedisCacheRepository) SetAvailableSeats(eventID uuid.UUID, seats []stri
 	return r.client.Expire(r.ctx, key, ttl).Err()
 }
 
-func (r *RedisCacheRepository) InvalidateAvailableSeats(eventID uuid.UUID) error {
+func (r *RedisCacheRepository) InvalidateAvailableSeats(eventID string) error {
 	key := r.availableSeatsKey(eventID)
 	return r.client.Del(r.ctx, key).Err()
 }
 
 // Seat count caching
-func (r *RedisCacheRepository) GetAvailableSeatCount(eventID uuid.UUID) (int, error) {
+func (r *RedisCacheRepository) GetAvailableSeatCount(eventID string) (int, error) {
 	key := r.availableSeatCountKey(eventID)
 	countStr, err := r.client.Get(r.ctx, key).Result()
 	if err != nil {
@@ -115,18 +114,18 @@ func (r *RedisCacheRepository) GetAvailableSeatCount(eventID uuid.UUID) (int, er
 	return count, nil
 }
 
-func (r *RedisCacheRepository) SetAvailableSeatCount(eventID uuid.UUID, count int, ttl time.Duration) error {
+func (r *RedisCacheRepository) SetAvailableSeatCount(eventID string, count int, ttl time.Duration) error {
 	key := r.availableSeatCountKey(eventID)
 	return r.client.Set(r.ctx, key, count, ttl).Err()
 }
 
-func (r *RedisCacheRepository) InvalidateAvailableSeatCount(eventID uuid.UUID) error {
+func (r *RedisCacheRepository) InvalidateAvailableSeatCount(eventID string) error {
 	key := r.availableSeatCountKey(eventID)
 	return r.client.Del(r.ctx, key).Err()
 }
 
 // Event details caching
-func (r *RedisCacheRepository) GetEvent(eventID uuid.UUID) (*model.Event, error) {
+func (r *RedisCacheRepository) GetEvent(eventID string) (*model.Event, error) {
 	key := r.eventKey(eventID)
 	eventData, err := r.client.Get(r.ctx, key).Result()
 	if err != nil {
@@ -144,7 +143,7 @@ func (r *RedisCacheRepository) GetEvent(eventID uuid.UUID) (*model.Event, error)
 	return &event, nil
 }
 
-func (r *RedisCacheRepository) SetEvent(eventID uuid.UUID, event *model.Event, ttl time.Duration) error {
+func (r *RedisCacheRepository) SetEvent(eventID string, event *model.Event, ttl time.Duration) error {
 	key := r.eventKey(eventID)
 	eventData, err := json.Marshal(event)
 	if err != nil {
@@ -154,7 +153,7 @@ func (r *RedisCacheRepository) SetEvent(eventID uuid.UUID, event *model.Event, t
 	return r.client.Set(r.ctx, key, eventData, ttl).Err()
 }
 
-func (r *RedisCacheRepository) InvalidateEvent(eventID uuid.UUID) error {
+func (r *RedisCacheRepository) InvalidateEvent(eventID string) error {
 	key := r.eventKey(eventID)
 	return r.client.Del(r.ctx, key).Err()
 }
@@ -208,7 +207,7 @@ func (r *RedisCacheRepository) Ping() error {
 }
 
 // Cache invalidation for event-related data
-func (r *RedisCacheRepository) InvalidateEventRelatedCache(eventID uuid.UUID) error {
+func (r *RedisCacheRepository) InvalidateEventRelatedCache(eventID string) error {
 	// Invalidate all event-related cache entries
 	keys := []string{
 		r.eventKey(eventID),

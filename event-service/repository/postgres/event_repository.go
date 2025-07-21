@@ -7,6 +7,7 @@ import (
 
 	"github.com/arunvm123/eventbooking/event-service/model"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -42,6 +43,7 @@ func (r *PostgresEventRepository) CreateEvent(req model.CreateEventRequest) (*mo
 
 	// Create event
 	event := model.Event{
+		ID:           req.ID,
 		Name:         req.Name,
 		Description:  req.Description,
 		Venue:        req.Venue,
@@ -69,7 +71,7 @@ func (r *PostgresEventRepository) CreateEvent(req model.CreateEventRequest) (*mo
 	return &event, nil
 }
 
-func (r *PostgresEventRepository) GetEventByID(eventID uuid.UUID) (*model.Event, error) {
+func (r *PostgresEventRepository) GetEventByID(eventID string) (*model.Event, error) {
 	var event model.Event
 	if err := r.db.Where("id = ?", eventID).First(&event).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -142,7 +144,7 @@ func (r *PostgresEventRepository) UpdateEvent(req model.UpdateEventRequest) (*mo
 	return &event, nil
 }
 
-func (r *PostgresEventRepository) DeleteEvent(eventID uuid.UUID) error {
+func (r *PostgresEventRepository) DeleteEvent(eventID string) error {
 	result := r.db.Delete(&model.Event{}, eventID)
 	if result.Error != nil {
 		return result.Error
@@ -154,7 +156,7 @@ func (r *PostgresEventRepository) DeleteEvent(eventID uuid.UUID) error {
 }
 
 // Seat operations
-func (r *PostgresEventRepository) GetAvailableSeats(eventID uuid.UUID) ([]string, error) {
+func (r *PostgresEventRepository) GetAvailableSeats(eventID string) ([]string, error) {
 	var seats []string
 	query := `
 		SELECT seat_number FROM seats s
@@ -170,7 +172,7 @@ func (r *PostgresEventRepository) GetAvailableSeats(eventID uuid.UUID) ([]string
 	return seats, nil
 }
 
-func (r *PostgresEventRepository) GetAvailableSeatCount(eventID uuid.UUID) (int, error) {
+func (r *PostgresEventRepository) GetAvailableSeatCount(eventID string) (int, error) {
 	var count int64
 	query := `
 		SELECT COUNT(*) FROM seats s
@@ -185,7 +187,11 @@ func (r *PostgresEventRepository) GetAvailableSeatCount(eventID uuid.UUID) (int,
 	return int(count), nil
 }
 
-func (r *PostgresEventRepository) CheckSeatsAvailability(eventID uuid.UUID, seatNumbers []string) ([]string, []string, error) {
+func (r *PostgresEventRepository) GetAvailableSeatNumbers(eventID string) ([]string, error) {
+	return r.GetAvailableSeats(eventID)
+}
+
+func (r *PostgresEventRepository) CheckSeatsAvailability(eventID string, seatNumbers []string) error {
 	var unavailableSeats []string
 	query := `
 		SELECT seat_number FROM seats s
@@ -194,24 +200,15 @@ func (r *PostgresEventRepository) CheckSeatsAvailability(eventID uuid.UUID, seat
 		AND s.status != 'available' 
 		AND NOT (s.status = 'held' AND h.expires_at < NOW())
 	`
-	if err := r.db.Raw(query, eventID, seatNumbers).Scan(&unavailableSeats).Error; err != nil {
-		return nil, nil, err
+	if err := r.db.Raw(query, eventID, pq.Array(seatNumbers)).Scan(&unavailableSeats).Error; err != nil {
+		return err
 	}
 
-	// Calculate available seats
-	unavailableMap := make(map[string]bool)
-	for _, seat := range unavailableSeats {
-		unavailableMap[seat] = true
+	if len(unavailableSeats) > 0 {
+		return fmt.Errorf("seats not available")
 	}
 
-	var availableSeats []string
-	for _, seat := range seatNumbers {
-		if !unavailableMap[seat] {
-			availableSeats = append(availableSeats, seat)
-		}
-	}
-
-	return availableSeats, unavailableSeats, nil
+	return nil
 }
 
 // Hold operations
@@ -224,19 +221,15 @@ func (r *PostgresEventRepository) CreateHold(req model.CreateHoldRequest) (*mode
 	}()
 
 	// Check seat availability
-	_, unavailable, err := r.CheckSeatsAvailability(req.EventID, req.SeatNumbers)
+	err := r.CheckSeatsAvailability(req.EventID, req.SeatNumbers)
 	if err != nil {
 		tx.Rollback()
 		return nil, err
 	}
 
-	if len(unavailable) > 0 {
-		tx.Rollback()
-		return nil, fmt.Errorf("seats not available: %v", unavailable)
-	}
-
 	// Create hold
 	hold := model.Hold{
+		ID:          req.ID,
 		UserID:      req.UserID,
 		EventID:     req.EventID,
 		SeatNumbers: req.SeatNumbers,
@@ -251,7 +244,7 @@ func (r *PostgresEventRepository) CreateHold(req model.CreateHoldRequest) (*mode
 
 	// Update seat status
 	if err := tx.Model(&model.Seat{}).
-		Where("event_id = ? AND seat_number IN ?", req.EventID, req.SeatNumbers).
+		Where("event_id = ? AND seat_number IN (?)", req.EventID, req.SeatNumbers).
 		Updates(map[string]interface{}{
 			"status":  "held",
 			"hold_id": hold.ID,
@@ -264,7 +257,7 @@ func (r *PostgresEventRepository) CreateHold(req model.CreateHoldRequest) (*mode
 	return &hold, nil
 }
 
-func (r *PostgresEventRepository) GetHoldByID(holdID uuid.UUID) (*model.Hold, error) {
+func (r *PostgresEventRepository) GetHoldByID(holdID string) (*model.Hold, error) {
 	var hold model.Hold
 	if err := r.db.Where("id = ?", holdID).First(&hold).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -275,7 +268,7 @@ func (r *PostgresEventRepository) GetHoldByID(holdID uuid.UUID) (*model.Hold, er
 	return &hold, nil
 }
 
-func (r *PostgresEventRepository) ReleaseHold(holdID uuid.UUID) error {
+func (r *PostgresEventRepository) ReleaseHold(holdID string) error {
 	tx := r.db.Begin()
 	defer func() {
 		if r := recover(); r != nil {
@@ -295,7 +288,7 @@ func (r *PostgresEventRepository) ReleaseHold(holdID uuid.UUID) error {
 
 	// Update seat status back to available
 	if err := tx.Model(&model.Seat{}).
-		Where("event_id = ? AND seat_number IN ?", hold.EventID, hold.SeatNumbers).
+		Where("event_id = ? AND seat_number IN (?)", hold.EventID, hold.SeatNumbers).
 		Updates(map[string]interface{}{
 			"status":  "available",
 			"hold_id": nil,
@@ -314,7 +307,7 @@ func (r *PostgresEventRepository) ReleaseHold(holdID uuid.UUID) error {
 	return nil
 }
 
-func (r *PostgresEventRepository) ConfirmHold(holdID uuid.UUID) error {
+func (r *PostgresEventRepository) ConfirmHold(holdID string) error {
 	tx := r.db.Begin()
 	defer func() {
 		if r := recover(); r != nil {
@@ -334,7 +327,7 @@ func (r *PostgresEventRepository) ConfirmHold(holdID uuid.UUID) error {
 
 	// Update seat status to booked
 	if err := tx.Model(&model.Seat{}).
-		Where("event_id = ? AND seat_number IN ?", hold.EventID, hold.SeatNumbers).
+		Where("event_id = ? AND seat_number IN (?)", hold.EventID, hold.SeatNumbers).
 		Update("status", "booked").Error; err != nil {
 		tx.Rollback()
 		return err
@@ -368,7 +361,7 @@ func (r *PostgresEventRepository) CleanupExpiredHolds() error {
 	for _, hold := range expiredHolds {
 		// Release seats
 		if err := tx.Model(&model.Seat{}).
-			Where("event_id = ? AND seat_number IN ?", hold.EventID, hold.SeatNumbers).
+			Where("event_id = ? AND seat_number IN (?)", hold.EventID, hold.SeatNumbers).
 			Updates(map[string]interface{}{
 				"status":  "available",
 				"hold_id": nil,
@@ -393,7 +386,7 @@ func (r *PostgresEventRepository) GetDB() *gorm.DB {
 }
 
 // Helper function to generate seats
-func (r *PostgresEventRepository) generateSeats(eventID uuid.UUID, totalSeats int) []model.Seat {
+func (r *PostgresEventRepository) generateSeats(eventID string, totalSeats int) []model.Seat {
 	var seats []model.Seat
 	seatCount := 0
 	row := 'A'
@@ -403,6 +396,7 @@ func (r *PostgresEventRepository) generateSeats(eventID uuid.UUID, totalSeats in
 		for seatNum <= 50 && seatCount < totalSeats { // Max 50 seats per row
 			seatNumber := fmt.Sprintf("%c%d", row, seatNum)
 			seats = append(seats, model.Seat{
+				ID:         uuid.New().String(),
 				EventID:    eventID,
 				SeatNumber: seatNumber,
 				Status:     "available",
