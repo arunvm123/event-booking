@@ -7,14 +7,14 @@ WORKDIR /app
 # Install git for dependencies
 RUN apk add --no-cache git
 
-# Copy go mod files
-COPY go.mod go.sum ./
+# Copy notification service go mod files
+COPY notification-service/go.mod notification-service/go.sum ./
 
 # Download dependencies
 RUN go mod download
 
-# Copy source code
-COPY . .
+# Copy notification service source code
+COPY notification-service/ .
 
 # Build the API binary
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o notification-service-api .
