@@ -20,10 +20,16 @@ var messagesProcessed int64
 func main() {
 	fmt.Println("Starting Notification Service Worker")
 
-	// Load configuration
+	// Initialize configuration
+	// Try to load from config.yaml first, fallback to environment variables
 	cfg, err := config.Initialise("config.yaml", false)
 	if err != nil {
-		log.Fatal("Failed to load configuration:", err)
+		// If config file fails, try environment variables
+		log.Printf("Config file not found or invalid, using environment variables: %v", err)
+		cfg, err = config.Initialise("", true)
+		if err != nil {
+			log.Fatal("Failed to load configuration:", err)
+		}
 	}
 
 	// Setup Kafka consumer
