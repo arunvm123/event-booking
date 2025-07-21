@@ -52,7 +52,7 @@ func (h *BookingHandler) SubmitBooking(c *gin.Context) {
 		return
 	}
 
-	userUUID, ok := userID.(uuid.UUID)
+	userUUID, ok := userID.(string)
 	if !ok {
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 			Error:   "internal_error",
@@ -73,15 +73,15 @@ func (h *BookingHandler) SubmitBooking(c *gin.Context) {
 			Status:        existingBooking.Status,
 			Message:       "Booking already exists for this hold",
 			EstimatedTime: "Already processed",
-			StatusURL:     fmt.Sprintf("/api/booking/%s/status", existingBooking.ID.String()),
-			StreamURL:     fmt.Sprintf("/api/booking/%s/stream", existingBooking.ID.String()),
+			StatusURL:     fmt.Sprintf("/api/booking/%s/status", existingBooking.ID),
+			StreamURL:     fmt.Sprintf("/api/booking/%s/stream", existingBooking.ID),
 		}
 		c.JSON(http.StatusAccepted, response)
 		return
 	}
 
-	// Get hold details from event service
-	holdDetails, err := h.eventService.GetHoldDetails(req.HoldID)
+	// Get hold details from event service (pass user context)
+	holdDetails, err := h.eventService.GetHoldDetails(req.HoldID, userUUID, userEmailStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, model.ErrorResponse{
 			Error:   "invalid_hold",
@@ -143,7 +143,7 @@ func (h *BookingHandler) SubmitBooking(c *gin.Context) {
 	msgBytes, _ := json.Marshal(kafkaMsg)
 	h.kafkaWriter.WriteMessages(c.Request.Context(),
 		kafka.Message{
-			Key:   []byte(booking.ID.String()),
+			Key:   []byte(booking.ID),
 			Value: msgBytes,
 		})
 
@@ -162,8 +162,8 @@ func (h *BookingHandler) SubmitBooking(c *gin.Context) {
 		Status:        "PROCESSING",
 		Message:       "Booking is being processed",
 		EstimatedTime: "2-3 minutes",
-		StatusURL:     fmt.Sprintf("/api/booking/%s/status", booking.ID.String()),
-		StreamURL:     fmt.Sprintf("/api/booking/%s/stream", booking.ID.String()),
+		StatusURL:     fmt.Sprintf("/api/booking/%s/status", booking.ID),
+		StreamURL:     fmt.Sprintf("/api/booking/%s/stream", booking.ID),
 	}
 
 	c.JSON(http.StatusAccepted, response)
@@ -172,16 +172,8 @@ func (h *BookingHandler) SubmitBooking(c *gin.Context) {
 // GetBookingStatus returns the current status of a booking
 func (h *BookingHandler) GetBookingStatus(c *gin.Context) {
 	bookingIDStr := c.Param("bookingId")
-	bookingID, err := uuid.Parse(bookingIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{
-			Error:   "invalid_id",
-			Message: "Invalid booking ID format",
-		})
-		return
-	}
 
-	booking, err := h.repo.GetBookingByID(bookingID)
+	booking, err := h.repo.GetBookingByID(bookingIDStr)
 	if err != nil {
 		if err.Error() == "booking not found" {
 			c.JSON(http.StatusNotFound, model.ErrorResponse{
@@ -204,17 +196,9 @@ func (h *BookingHandler) GetBookingStatus(c *gin.Context) {
 // StreamBookingStatus provides Server-Sent Events for real-time booking updates
 func (h *BookingHandler) StreamBookingStatus(c *gin.Context) {
 	bookingIDStr := c.Param("bookingId")
-	bookingID, err := uuid.Parse(bookingIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, model.ErrorResponse{
-			Error:   "invalid_id",
-			Message: "Invalid booking ID format",
-		})
-		return
-	}
 
 	// Verify booking exists
-	booking, err := h.repo.GetBookingByID(bookingID)
+	booking, err := h.repo.GetBookingByID(bookingIDStr)
 	if err != nil {
 		c.JSON(http.StatusNotFound, model.ErrorResponse{
 			Error:   "not_found",
@@ -259,7 +243,7 @@ func (h *BookingHandler) StreamBookingStatus(c *gin.Context) {
 		select {
 		case <-ticker.C:
 			// Check for status updates
-			updated, err := h.repo.GetBookingByID(bookingID)
+			updated, err := h.repo.GetBookingByID(bookingIDStr)
 			if err != nil {
 				continue
 			}
@@ -305,7 +289,7 @@ func (h *BookingHandler) ListUserBookings(c *gin.Context) {
 		return
 	}
 
-	userUUID, ok := userID.(uuid.UUID)
+	userUUID, ok := userID.(string)
 	if !ok {
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{
 			Error:   "internal_error",

@@ -10,19 +10,66 @@ import (
 
 	"github.com/arunvm123/eventbooking/booking-service/config"
 	"github.com/arunvm123/eventbooking/booking-service/service"
-	"github.com/google/uuid"
+	"github.com/golang-jwt/jwt/v5"
 )
+
+// JWTServiceInterface defines the interface for JWT operations
+type JWTServiceInterface interface {
+	GenerateServiceToken(userID, userEmail string) (string, error)
+}
+
+// JWTService handles JWT operations for service-to-service communication
+type JWTService struct {
+	secretKey string
+}
+
+func NewJWTService(secretKey string) *JWTService {
+	return &JWTService{secretKey: secretKey}
+}
+
+// Claims represents the JWT claims
+type Claims struct {
+	UserID string `json:"user_id"`
+	Email  string `json:"email"`
+	jwt.RegisteredClaims
+}
+
+// GenerateServiceToken generates a JWT token for service-to-service communication
+func (j *JWTService) GenerateServiceToken(userID, userEmail string) (string, error) {
+	// Create claims for service-to-service communication with actual user context
+	claims := Claims{
+		UserID: userID,
+		Email:  userEmail,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "booking-service",
+			Subject:   "service-auth",
+		},
+	}
+
+	// Create token with claims
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// Generate encoded token and send it as response
+	tokenString, err := token.SignedString([]byte(j.secretKey))
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
+}
 
 type HTTPEventService struct {
 	baseURL    string
 	httpClient *http.Client
-	jwtSecret  string
+	jwtService JWTServiceInterface
 }
 
 func NewHTTPEventService(baseURL, jwtSecret string) *HTTPEventService {
 	return &HTTPEventService{
-		baseURL:   baseURL,
-		jwtSecret: jwtSecret,
+		baseURL:    baseURL,
+		jwtService: NewJWTService(jwtSecret),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -42,8 +89,8 @@ func NewHTTPEventServiceWithConfig(cfg *config.EventService, jwtSecret string) *
 	}
 
 	return &HTTPEventService{
-		baseURL:   cfg.BaseURL,
-		jwtSecret: jwtSecret,
+		baseURL:    cfg.BaseURL,
+		jwtService: NewJWTService(jwtSecret),
 		httpClient: &http.Client{
 			Timeout:   time.Duration(cfg.RequestTimeout) * time.Second,
 			Transport: transport,
@@ -52,16 +99,22 @@ func NewHTTPEventServiceWithConfig(cfg *config.EventService, jwtSecret string) *
 }
 
 // GetHoldDetails retrieves hold information from the event service
-func (s *HTTPEventService) GetHoldDetails(holdID uuid.UUID) (*service.HoldDetails, error) {
-	url := fmt.Sprintf("%s/api/events/holds/%s", s.baseURL, holdID.String())
+func (s *HTTPEventService) GetHoldDetails(holdID, userID, userEmail string) (*service.HoldDetails, error) {
+	url := fmt.Sprintf("%s/api/events/holds/%s", s.baseURL, holdID)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Generate JWT token for service-to-service authentication with user context
+	token, err := s.jwtService.GenerateServiceToken(userID, userEmail)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate service token: %w", err)
+	}
+
 	// Add internal service authentication header
-	req.Header.Set("X-Service-Auth", s.jwtSecret)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.httpClient.Do(req)
@@ -88,16 +141,22 @@ func (s *HTTPEventService) GetHoldDetails(holdID uuid.UUID) (*service.HoldDetail
 }
 
 // ConfirmHold confirms a hold (converts it to booking) in the event service
-func (s *HTTPEventService) ConfirmHold(holdID uuid.UUID) error {
-	url := fmt.Sprintf("%s/api/events/holds/%s/confirm", s.baseURL, holdID.String())
+func (s *HTTPEventService) ConfirmHold(holdID, userID, userEmail string) error {
+	url := fmt.Sprintf("%s/api/events/holds/%s/confirm", s.baseURL, holdID)
 
 	req, err := http.NewRequest("POST", url, bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Generate JWT token for service-to-service authentication with user context
+	token, err := s.jwtService.GenerateServiceToken(userID, userEmail)
+	if err != nil {
+		return fmt.Errorf("failed to generate service token: %w", err)
+	}
+
 	// Add internal service authentication header
-	req.Header.Set("X-Service-Auth", s.jwtSecret)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.httpClient.Do(req)
@@ -119,21 +178,27 @@ func (s *HTTPEventService) ConfirmHold(holdID uuid.UUID) error {
 }
 
 // ReleaseHold releases a hold in the event service
-func (s *HTTPEventService) ReleaseHold(holdID uuid.UUID) error {
-	url := fmt.Sprintf("%s/api/events/holds/%s", s.baseURL, holdID.String())
+func (s *HTTPEventService) ReleaseHold(holdID, userID, userEmail string) error {
+	url := fmt.Sprintf("%s/api/events/holds/%s", s.baseURL, holdID)
 
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Generate JWT token for service-to-service authentication with user context
+	token, err := s.jwtService.GenerateServiceToken(userID, userEmail)
+	if err != nil {
+		return fmt.Errorf("failed to generate service token: %w", err)
+	}
+
 	// Add internal service authentication header
-	req.Header.Set("X-Service-Auth", s.jwtSecret)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to make request: %w", err)
+		return fmt.Errorf("failed to create request: %w", err)
 	}
 	defer resp.Body.Close()
 

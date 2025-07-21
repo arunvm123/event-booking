@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 )
 
 // JWT service for token validation
@@ -23,9 +22,35 @@ func NewJWTService(secretKey string) *JWTService {
 
 // Claims represents the JWT claims
 type Claims struct {
-	UserID uuid.UUID `json:"user_id"`
-	Email  string    `json:"email"`
+	UserID string `json:"user_id"`
+	Email  string `json:"email"`
 	jwt.RegisteredClaims
+}
+
+// GenerateServiceToken generates a JWT token for service-to-service communication
+func (j *JWTService) GenerateServiceToken() (string, error) {
+	// Create claims for service-to-service communication
+	claims := Claims{
+		UserID: "booking-service",
+		Email:  "booking-service@internal",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "booking-service",
+			Subject:   "service-auth",
+		},
+	}
+
+	// Create token with claims
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// Generate encoded token and send it as response
+	tokenString, err := token.SignedString([]byte(j.secretKey))
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
 }
 
 // ValidateToken validates a JWT token and returns the claims

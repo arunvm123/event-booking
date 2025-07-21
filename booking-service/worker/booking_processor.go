@@ -14,7 +14,6 @@ import (
 	"github.com/arunvm123/eventbooking/booking-service/model"
 	"github.com/arunvm123/eventbooking/booking-service/repository"
 	"github.com/arunvm123/eventbooking/booking-service/service"
-	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -58,16 +57,16 @@ var (
 
 // resetBookingRequest clears a booking request for reuse
 func resetBookingRequest(req *model.BookingRequest) {
-	req.BookingID = uuid.Nil
-	req.UserID = uuid.Nil
+	req.BookingID = ""
+	req.UserID = ""
 	req.UserEmail = ""
 	req.UserName = ""
-	req.EventID = uuid.Nil
+	req.EventID = ""
 	req.EventName = ""
 	req.Venue = ""
 	req.EventDate = time.Time{}
 	req.Seats = req.Seats[:0] // Keep capacity, reset length
-	req.HoldID = uuid.Nil
+	req.HoldID = ""
 	req.PaymentInfo = model.PaymentInfo{}
 }
 
@@ -81,7 +80,7 @@ func resetNotificationRequest(req *model.NotificationRequest) {
 
 // resetStatusUpdate clears a status update for reuse
 func resetStatusUpdate(update *model.BookingStatusUpdate) {
-	update.BookingID = uuid.Nil
+	update.BookingID = ""
 	update.Status = ""
 	update.Message = ""
 	update.UpdatedAt = time.Time{}
@@ -288,7 +287,7 @@ func (p *BookingProcessor) processBooking(msg kafka.Message) error {
 	// Step 1: Simulate payment processing
 	if err := p.processPayment(*bookingReq); err != nil {
 		// Payment failed - release hold and mark booking as failed
-		p.eventService.ReleaseHold(bookingReq.HoldID)
+		p.eventService.ReleaseHold(bookingReq.HoldID, bookingReq.UserID, bookingReq.UserEmail)
 		failTime := time.Now()
 		errMsg := fmt.Sprintf("Payment failed: %s", err.Error())
 		p.updateBookingStatus(bookingReq.BookingID, "failed", "failed", errMsg, nil, &failTime)
@@ -297,7 +296,7 @@ func (p *BookingProcessor) processBooking(msg kafka.Message) error {
 	}
 
 	// Step 2: Confirm hold with Event Service (mark seats as booked)
-	if err := p.eventService.ConfirmHold(bookingReq.HoldID); err != nil {
+	if err := p.eventService.ConfirmHold(bookingReq.HoldID, bookingReq.UserID, bookingReq.UserEmail); err != nil {
 		// Hold confirmation failed - could be expired, seats taken, etc.
 		failTime := time.Now()
 		errMsg := fmt.Sprintf("Failed to confirm seats: %s", err.Error())
@@ -343,7 +342,7 @@ func (p *BookingProcessor) processPayment(bookingReq model.BookingRequest) error
 }
 
 // updateBookingStatus updates booking status in both database and cache
-func (p *BookingProcessor) updateBookingStatus(bookingID uuid.UUID, status, paymentStatus, message string, confirmedAt, failedAt *time.Time) {
+func (p *BookingProcessor) updateBookingStatus(bookingID string, status, paymentStatus, message string, confirmedAt, failedAt *time.Time) {
 	// Update database
 	updateReq := model.UpdateBookingStatusRequest{
 		BookingID:     bookingID,
@@ -413,7 +412,7 @@ func (p *BookingProcessor) sendNotification(bookingReq model.BookingRequest, not
 
 	p.kafkaWriter.WriteMessages(context.Background(),
 		kafka.Message{
-			Key:   []byte(bookingReq.BookingID.String()),
+			Key:   []byte(bookingReq.BookingID),
 			Value: jsonBuffer.Bytes(),
 		})
 }

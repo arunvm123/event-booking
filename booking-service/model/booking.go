@@ -3,7 +3,7 @@ package model
 import (
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // ============================================================================
@@ -12,21 +12,21 @@ import (
 
 // Booking represents the database model for bookings
 type Booking struct {
-	ID            uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
-	UserID        uuid.UUID `gorm:"type:uuid;not null;index"`
-	UserEmail     string    `gorm:"type:varchar(255);not null"`
-	UserName      string    `gorm:"type:varchar(255);not null"`
-	EventID       uuid.UUID `gorm:"type:uuid;not null;index"`
-	EventName     string    `gorm:"type:varchar(255);not null"`
-	Venue         string    `gorm:"type:varchar(255);not null"`
-	EventDate     time.Time `gorm:"not null"`
-	Seats         []string  `gorm:"type:text[];not null"`
-	TotalAmount   float64   `gorm:"type:decimal(10,2);not null"`
-	Status        string    `gorm:"type:varchar(20);not null;default:'processing'"`
-	PaymentStatus string    `gorm:"type:varchar(20);not null;default:'pending'"`
-	HoldID        uuid.UUID `gorm:"type:uuid;not null;index"`
-	ErrorMessage  *string   `gorm:"type:text"`
-	CreatedAt     time.Time `gorm:"default:CURRENT_TIMESTAMP"`
+	ID            string         `gorm:"primary_key;default:gen_random_uuid()"`
+	UserID        string         `gorm:"not null;index"`
+	UserEmail     string         `gorm:"type:varchar(255);not null"`
+	UserName      string         `gorm:"type:varchar(255);not null"`
+	EventID       string         `gorm:"not null;index"`
+	EventName     string         `gorm:"type:varchar(255);not null"`
+	Venue         string         `gorm:"type:varchar(255);not null"`
+	EventDate     time.Time      `gorm:"not null"`
+	Seats         pq.StringArray `gorm:"type:text[];not null"`
+	TotalAmount   float64        `gorm:"type:decimal(10,2);not null"`
+	Status        string         `gorm:"type:varchar(20);not null;default:'processing'"`
+	PaymentStatus string         `gorm:"type:varchar(20);not null;default:'pending'"`
+	HoldID        string         `gorm:"not null;index"`
+	ErrorMessage  *string        `gorm:"type:text"`
+	CreatedAt     time.Time      `gorm:"default:CURRENT_TIMESTAMP"`
 	ConfirmedAt   *time.Time
 	FailedAt      *time.Time
 }
@@ -42,22 +42,22 @@ func (Booking) TableName() string {
 
 // CreateBookingRequest represents the data needed to create a booking
 type CreateBookingRequest struct {
-	UserID        uuid.UUID
+	UserID        string
 	UserEmail     string
 	UserName      string
-	EventID       uuid.UUID
+	EventID       string
 	EventName     string
 	Venue         string
 	EventDate     time.Time
 	Seats         []string
 	TotalAmount   float64
-	HoldID        uuid.UUID
+	HoldID        string
 	PaymentMethod string
 }
 
 // UpdateBookingStatusRequest represents a booking status update
 type UpdateBookingStatusRequest struct {
-	BookingID     uuid.UUID
+	BookingID     string
 	Status        string
 	PaymentStatus string
 	ErrorMessage  *string
@@ -67,7 +67,7 @@ type UpdateBookingStatusRequest struct {
 
 // BookingFilter represents filtering options for booking queries
 type BookingFilter struct {
-	UserID uuid.UUID
+	UserID string
 	Status string
 	Limit  int
 	Offset int
@@ -79,7 +79,7 @@ type BookingFilter struct {
 
 // SubmitBookingRequest represents the API request to submit a booking
 type SubmitBookingRequest struct {
-	HoldID      uuid.UUID   `json:"hold_id" binding:"required"`
+	HoldID      string      `json:"hold_id" binding:"required"`
 	PaymentInfo PaymentInfo `json:"payment_info" binding:"required"`
 }
 
@@ -91,17 +91,17 @@ type PaymentInfo struct {
 
 // BookingResponse represents the API response after booking submission
 type BookingResponse struct {
-	BookingID     uuid.UUID `json:"booking_id"`
-	Status        string    `json:"status"`
-	Message       string    `json:"message"`
-	EstimatedTime string    `json:"estimated_time"`
-	StatusURL     string    `json:"status_url"`
-	StreamURL     string    `json:"stream_url"`
+	BookingID     string `json:"booking_id"`
+	Status        string `json:"status"`
+	Message       string `json:"message"`
+	EstimatedTime string `json:"estimated_time"`
+	StatusURL     string `json:"status_url"`
+	StreamURL     string `json:"stream_url"`
 }
 
 // BookingStatusResponse represents the detailed booking status response
 type BookingStatusResponse struct {
-	BookingID     uuid.UUID            `json:"booking_id"`
+	BookingID     string               `json:"booking_id"`
 	Status        string               `json:"status"`
 	Event         *BookingEventDetails `json:"event,omitempty"`
 	Seats         []string             `json:"seats,omitempty"`
@@ -115,7 +115,7 @@ type BookingStatusResponse struct {
 
 // BookingEventDetails represents event information in booking status
 type BookingEventDetails struct {
-	EventID   uuid.UUID `json:"event_id"`
+	EventID   string    `json:"event_id"`
 	Name      string    `json:"name"`
 	Venue     string    `json:"venue"`
 	EventDate time.Time `json:"event_date"`
@@ -129,7 +129,7 @@ type UserBookingsResponse struct {
 
 // UserBookingSummary represents a summary of user booking for listing
 type UserBookingSummary struct {
-	BookingID   uuid.UUID `json:"booking_id"`
+	BookingID   string    `json:"booking_id"`
 	Status      string    `json:"status"`
 	EventName   string    `json:"event_name"`
 	Venue       string    `json:"venue"`
@@ -141,7 +141,7 @@ type UserBookingSummary struct {
 
 // BookingStatusUpdate represents real-time status updates for SSE
 type BookingStatusUpdate struct {
-	BookingID uuid.UUID `json:"booking_id"`
+	BookingID string    `json:"booking_id"`
 	Status    string    `json:"status"`
 	Message   string    `json:"message"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -166,12 +166,12 @@ type ErrorResponse struct {
 
 // BookingRequest represents the message sent to Kafka booking topic
 type BookingRequest struct {
-	BookingID   uuid.UUID   `json:"booking_id"`
-	UserID      uuid.UUID   `json:"user_id"`
+	BookingID   string      `json:"booking_id"`
+	UserID      string      `json:"user_id"`
 	UserEmail   string      `json:"user_email"`
 	UserName    string      `json:"user_name"`
-	HoldID      uuid.UUID   `json:"hold_id"`
-	EventID     uuid.UUID   `json:"event_id"`
+	HoldID      string      `json:"hold_id"`
+	EventID     string      `json:"event_id"`
 	EventName   string      `json:"event_name"`
 	Venue       string      `json:"venue"`
 	EventDate   time.Time   `json:"event_date"`
@@ -190,7 +190,7 @@ type NotificationRequest struct {
 
 // NotificationBookingData represents booking data for notifications
 type NotificationBookingData struct {
-	BookingID   uuid.UUID `json:"booking_id"`
+	BookingID   string    `json:"booking_id"`
 	EventName   string    `json:"event_name"`
 	Venue       string    `json:"venue"`
 	EventDate   time.Time `json:"event_date"`

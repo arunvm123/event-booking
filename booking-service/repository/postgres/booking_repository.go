@@ -7,7 +7,6 @@ import (
 
 	"github.com/arunvm123/eventbooking/booking-service/config"
 	"github.com/arunvm123/eventbooking/booking-service/model"
-	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -80,7 +79,7 @@ func (r *PostgresBookingRepository) CreateBooking(req model.CreateBookingRequest
 }
 
 // GetBookingByID retrieves a booking by its ID
-func (r *PostgresBookingRepository) GetBookingByID(bookingID uuid.UUID) (*model.Booking, error) {
+func (r *PostgresBookingRepository) GetBookingByID(bookingID string) (*model.Booking, error) {
 	var booking model.Booking
 	err := r.db.Where("id = ?", bookingID).First(&booking).Error
 	if err != nil {
@@ -94,7 +93,7 @@ func (r *PostgresBookingRepository) GetBookingByID(bookingID uuid.UUID) (*model.
 }
 
 // GetBookingByHoldID retrieves a booking by hold ID
-func (r *PostgresBookingRepository) GetBookingByHoldID(holdID uuid.UUID) (*model.Booking, error) {
+func (r *PostgresBookingRepository) GetBookingByHoldID(holdID string) (*model.Booking, error) {
 	var booking model.Booking
 	err := r.db.Where("hold_id = ?", holdID).First(&booking).Error
 	if err != nil {

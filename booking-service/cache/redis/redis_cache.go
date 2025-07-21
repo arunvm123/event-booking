@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/arunvm123/eventbooking/booking-service/model"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -37,12 +36,12 @@ func NewRedisCacheRepository(redisURL, password string, db int) (*RedisCacheRepo
 }
 
 // Cache key generator
-func (r *RedisCacheRepository) bookingStatusKey(bookingID uuid.UUID) string {
-	return fmt.Sprintf("booking_status:%s", bookingID.String())
+func (r *RedisCacheRepository) bookingStatusKey(bookingID string) string {
+	return fmt.Sprintf("booking_status:%s", bookingID)
 }
 
 // GetBookingStatus retrieves booking status update from cache
-func (r *RedisCacheRepository) GetBookingStatus(bookingID uuid.UUID) (*model.BookingStatusUpdate, error) {
+func (r *RedisCacheRepository) GetBookingStatus(bookingID string) (*model.BookingStatusUpdate, error) {
 	key := r.bookingStatusKey(bookingID)
 	statusData, err := r.client.Get(r.ctx, key).Result()
 	if err != nil {
@@ -61,7 +60,7 @@ func (r *RedisCacheRepository) GetBookingStatus(bookingID uuid.UUID) (*model.Boo
 }
 
 // SetBookingStatus stores booking status update in cache
-func (r *RedisCacheRepository) SetBookingStatus(bookingID uuid.UUID, status *model.BookingStatusUpdate, ttl time.Duration) error {
+func (r *RedisCacheRepository) SetBookingStatus(bookingID string, status *model.BookingStatusUpdate, ttl time.Duration) error {
 	key := r.bookingStatusKey(bookingID)
 	statusData, err := json.Marshal(status)
 	if err != nil {
@@ -72,7 +71,7 @@ func (r *RedisCacheRepository) SetBookingStatus(bookingID uuid.UUID, status *mod
 }
 
 // InvalidateBookingStatus removes booking status from cache
-func (r *RedisCacheRepository) InvalidateBookingStatus(bookingID uuid.UUID) error {
+func (r *RedisCacheRepository) InvalidateBookingStatus(bookingID string) error {
 	key := r.bookingStatusKey(bookingID)
 	return r.client.Del(r.ctx, key).Err()
 }
