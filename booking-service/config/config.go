@@ -14,6 +14,11 @@ type Config struct {
 	Redis        Redis        `yaml:"redis"`
 	Kafka        Kafka        `yaml:"kafka"`
 	EventService EventService `yaml:"event_service"`
+	Worker       Worker       `yaml:"worker"`
+}
+
+type Worker struct {
+	MaxWorkers int `yaml:"max_workers" env:"WORKER_MAX_WORKERS" env-default:"20"`
 }
 
 type Database struct {

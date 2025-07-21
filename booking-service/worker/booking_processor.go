@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync/atomic"
 	"time"
 
 	"github.com/arunvm123/eventbooking/booking-service/cache"
@@ -21,6 +22,22 @@ type BookingProcessor struct {
 	eventService service.EventService
 	kafkaWriter  *kafka.Writer
 	consumer     *kafka.Reader
+
+	// Worker pool for managing goroutines
+	workerPool chan chan kafka.Message
+	workers    []*BookingWorker
+
+	// Metrics
+	processedCount int64
+	activeWorkers  int64
+}
+
+type BookingWorker struct {
+	id         int
+	processor  *BookingProcessor
+	jobChannel chan kafka.Message
+	workerPool chan chan kafka.Message
+	quit       chan bool
 }
 
 func NewBookingProcessor(
@@ -30,23 +47,52 @@ func NewBookingProcessor(
 	kafkaWriter *kafka.Writer,
 	consumer *kafka.Reader,
 ) *BookingProcessor {
-	return &BookingProcessor{
+	// Worker pool configuration
+	maxWorkers := 20
+
+	processor := &BookingProcessor{
 		repo:         repo,
 		cache:        cache,
 		eventService: eventService,
 		kafkaWriter:  kafkaWriter,
 		consumer:     consumer,
+		workerPool:   make(chan chan kafka.Message, maxWorkers),
+		workers:      make([]*BookingWorker, maxWorkers),
 	}
+
+	// Initialize worker pool
+	for i := 0; i < maxWorkers; i++ {
+		worker := &BookingWorker{
+			id:         i,
+			processor:  processor,
+			jobChannel: make(chan kafka.Message),
+			workerPool: processor.workerPool,
+			quit:       make(chan bool),
+		}
+		processor.workers[i] = worker
+	}
+
+	return processor
 }
 
 // Start begins processing booking requests from Kafka
 func (p *BookingProcessor) Start(ctx context.Context) error {
-	log.Println("Starting booking processor...")
+	log.Printf("Starting booking processor with %d workers...", len(p.workers))
 
+	// Start all workers
+	for _, worker := range p.workers {
+		worker.start()
+	}
+
+	// Start metrics reporting goroutine
+	go p.reportMetrics(ctx)
+
+	// Main message processing loop
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Booking processor shutting down...")
+			p.shutdown()
 			return ctx.Err()
 		default:
 			// Read message from Kafka
@@ -56,11 +102,95 @@ func (p *BookingProcessor) Start(ctx context.Context) error {
 				continue
 			}
 
-			// Process the booking
-			if err := p.processBooking(msg); err != nil {
-				log.Printf("Error processing booking: %v", err)
-				// Could implement retry logic here
+			// Dispatch to worker pool (blocks if all workers busy)
+			select {
+			case jobChannel := <-p.workerPool:
+				// Send job to available worker
+				select {
+				case jobChannel <- msg:
+					// Successfully dispatched
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			case <-ctx.Done():
+				return ctx.Err()
 			}
+		}
+	}
+}
+
+// BookingWorker methods
+func (w *BookingWorker) start() {
+	go func() {
+		for {
+			// Register this worker in the pool
+			w.workerPool <- w.jobChannel
+
+			select {
+			case job := <-w.jobChannel:
+				// Process the booking
+				atomic.AddInt64(&w.processor.activeWorkers, 1)
+
+				if err := w.processor.processBooking(job); err != nil {
+					log.Printf("Worker %d error processing booking: %v", w.id, err)
+				}
+
+				atomic.AddInt64(&w.processor.processedCount, 1)
+				atomic.AddInt64(&w.processor.activeWorkers, -1)
+
+			case <-w.quit:
+				log.Printf("Worker %d shutting down", w.id)
+				return
+			}
+		}
+	}()
+}
+
+func (w *BookingWorker) stop() {
+	w.quit <- true
+}
+
+// shutdown gracefully stops all workers
+func (p *BookingProcessor) shutdown() {
+	log.Println("Shutting down booking processor workers...")
+
+	for _, worker := range p.workers {
+		worker.stop()
+	}
+
+	// Wait for active workers to finish (with timeout)
+	timeout := time.After(30 * time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			log.Println("Shutdown timeout reached, forcing exit")
+			return
+		case <-ticker.C:
+			if atomic.LoadInt64(&p.activeWorkers) == 0 {
+				log.Println("All workers finished gracefully")
+				return
+			}
+		}
+	}
+}
+
+// reportMetrics logs performance metrics
+func (p *BookingProcessor) reportMetrics(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			processed := atomic.LoadInt64(&p.processedCount)
+			active := atomic.LoadInt64(&p.activeWorkers)
+			log.Printf("Booking Processor Metrics - Processed: %d, Active Workers: %d",
+				processed, active)
 		}
 	}
 }
