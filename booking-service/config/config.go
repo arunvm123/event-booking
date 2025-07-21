@@ -28,6 +28,11 @@ type Database struct {
 	Host         string `yaml:"host" env:"DB_HOST" env-default:"localhost"`
 	Port         string `yaml:"port" env:"DB_PORT" env-default:"5432"`
 	SSLMode      string `yaml:"ssl_mode" env:"DB_SSL_MODE" env-default:"disable"`
+
+	// Connection Pool Settings
+	MaxOpenConns    int `yaml:"max_open_conns" env:"DB_MAX_OPEN_CONNS" env-default:"25"`
+	MaxIdleConns    int `yaml:"max_idle_conns" env:"DB_MAX_IDLE_CONNS" env-default:"10"`
+	ConnMaxLifetime int `yaml:"conn_max_lifetime_minutes" env:"DB_CONN_MAX_LIFETIME" env-default:"30"`
 }
 
 func (d *Database) GetDatabaseURL() string {

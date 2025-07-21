@@ -1,8 +1,11 @@
 package postgres
 
 import (
+	"database/sql"
 	"fmt"
+	"time"
 
+	"github.com/arunvm123/eventbooking/booking-service/config"
 	"github.com/arunvm123/eventbooking/booking-service/model"
 	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
@@ -13,11 +16,21 @@ type PostgresBookingRepository struct {
 	db *gorm.DB
 }
 
-func NewBookingRepository(databaseURL string) (*PostgresBookingRepository, error) {
-	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{})
+func NewBookingRepository(cfg *config.Database) (*PostgresBookingRepository, error) {
+	// Open database connection
+	db, err := gorm.Open(postgres.Open(cfg.GetDatabaseURL()), &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
+
+	// Get underlying sql.DB to configure connection pool
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
+	}
+
+	// Configure connection pool
+	configureConnectionPool(sqlDB, cfg)
 
 	// Auto-migrate the booking table
 	if err := db.AutoMigrate(&model.Booking{}); err != nil {
@@ -25,6 +38,21 @@ func NewBookingRepository(databaseURL string) (*PostgresBookingRepository, error
 	}
 
 	return &PostgresBookingRepository{db: db}, nil
+}
+
+// configureConnectionPool sets up database connection pooling
+func configureConnectionPool(sqlDB *sql.DB, cfg *config.Database) {
+	// Set maximum number of open connections
+	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
+
+	// Set maximum number of idle connections
+	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
+
+	// Set maximum lifetime of connections
+	sqlDB.SetConnMaxLifetime(time.Duration(cfg.ConnMaxLifetime) * time.Minute)
+
+	// Set connection max idle time (optional - helps with connection cleanup)
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 }
 
 // CreateBooking creates a new booking record

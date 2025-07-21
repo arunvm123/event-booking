@@ -13,7 +13,7 @@ import (
 
 func SetupRouter(cfg *config.Config) *gin.Engine {
 	// Initialize repository
-	repo, err := postgres.NewBookingRepository(cfg.Database.GetDatabaseURL())
+	repo, err := postgres.NewBookingRepository(&cfg.Database)
 	if err != nil {
 		log.Fatal("Failed to initialize repository:", err)
 	}
