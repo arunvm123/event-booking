@@ -60,6 +60,13 @@ type Kafka struct {
 
 type EventService struct {
 	BaseURL string `yaml:"base_url" env:"EVENT_SERVICE_URL" env-default:"http://event-service:8082"`
+
+	// HTTP Connection Pool Settings
+	MaxIdleConns        int `yaml:"max_idle_conns" env:"HTTP_MAX_IDLE_CONNS" env-default:"20"`
+	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host" env:"HTTP_MAX_IDLE_CONNS_PER_HOST" env-default:"10"`
+	MaxConnsPerHost     int `yaml:"max_conns_per_host" env:"HTTP_MAX_CONNS_PER_HOST" env-default:"20"`
+	IdleConnTimeout     int `yaml:"idle_conn_timeout_seconds" env:"HTTP_IDLE_CONN_TIMEOUT" env-default:"90"`
+	RequestTimeout      int `yaml:"request_timeout_seconds" env:"HTTP_REQUEST_TIMEOUT" env-default:"30"`
 }
 
 func Initialise(configPath string, useEnv bool) (*Config, error) {

@@ -37,8 +37,8 @@ func main() {
 		log.Fatal("Failed to initialize cache:", err)
 	}
 
-	// Initialize Event Service client
-	eventService := http.NewHTTPEventService(cfg.EventService.BaseURL, cfg.JWTSecret)
+	// Initialize Event Service client with connection pooling
+	eventService := http.NewHTTPEventServiceWithConfig(&cfg.EventService, cfg.JWTSecret)
 
 	// Initialize Kafka writer for notifications
 	kafkaWriter := &kafka.Writer{

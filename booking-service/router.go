@@ -24,8 +24,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		log.Fatal("Failed to initialize cache:", err)
 	}
 
-	// Initialize Event Service client
-	eventService := httpservice.NewHTTPEventService(cfg.EventService.BaseURL, cfg.JWTSecret)
+	// Initialize Event Service client with connection pooling
+	eventService := httpservice.NewHTTPEventServiceWithConfig(&cfg.EventService, cfg.JWTSecret)
 
 	// Initialize Kafka writer
 	kafkaWriter := &kafka.Writer{

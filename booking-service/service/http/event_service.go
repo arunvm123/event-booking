@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/arunvm123/eventbooking/booking-service/config"
 	"github.com/arunvm123/eventbooking/booking-service/service"
 	"github.com/google/uuid"
 )
@@ -24,6 +25,28 @@ func NewHTTPEventService(baseURL, jwtSecret string) *HTTPEventService {
 		jwtSecret: jwtSecret,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
+		},
+	}
+}
+
+// NewHTTPEventServiceWithConfig creates a new HTTP event service with connection pooling
+func NewHTTPEventServiceWithConfig(cfg *config.EventService, jwtSecret string) *HTTPEventService {
+	// Create HTTP transport with connection pooling
+	transport := &http.Transport{
+		MaxIdleConns:        cfg.MaxIdleConns,
+		MaxIdleConnsPerHost: cfg.MaxIdleConnsPerHost,
+		MaxConnsPerHost:     cfg.MaxConnsPerHost,
+		IdleConnTimeout:     time.Duration(cfg.IdleConnTimeout) * time.Second,
+		DisableKeepAlives:   false, // Enable keep-alive for connection reuse
+		ForceAttemptHTTP2:   true,  // Enable HTTP/2 for better multiplexing
+	}
+
+	return &HTTPEventService{
+		baseURL:   cfg.BaseURL,
+		jwtSecret: jwtSecret,
+		httpClient: &http.Client{
+			Timeout:   time.Duration(cfg.RequestTimeout) * time.Second,
+			Transport: transport,
 		},
 	}
 }
