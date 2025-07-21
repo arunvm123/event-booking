@@ -1,10 +1,12 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,6 +17,75 @@ import (
 	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
 )
+
+// Object pools for memory optimization
+var (
+	// Pool for booking request objects
+	bookingRequestPool = sync.Pool{
+		New: func() interface{} {
+			return &model.BookingRequest{}
+		},
+	}
+
+	// Pool for notification request objects
+	notificationRequestPool = sync.Pool{
+		New: func() interface{} {
+			return &model.NotificationRequest{}
+		},
+	}
+
+	// Pool for JSON encoding/decoding buffers
+	jsonBufferPool = sync.Pool{
+		New: func() interface{} {
+			return &bytes.Buffer{}
+		},
+	}
+
+	// Pool for byte slices used in HTTP/JSON operations
+	byteSlicePool = sync.Pool{
+		New: func() interface{} {
+			return make([]byte, 0, 4096) // 4KB initial capacity
+		},
+	}
+
+	// Pool for status update objects
+	statusUpdatePool = sync.Pool{
+		New: func() interface{} {
+			return &model.BookingStatusUpdate{}
+		},
+	}
+)
+
+// resetBookingRequest clears a booking request for reuse
+func resetBookingRequest(req *model.BookingRequest) {
+	req.BookingID = uuid.Nil
+	req.UserID = uuid.Nil
+	req.UserEmail = ""
+	req.UserName = ""
+	req.EventID = uuid.Nil
+	req.EventName = ""
+	req.Venue = ""
+	req.EventDate = time.Time{}
+	req.Seats = req.Seats[:0] // Keep capacity, reset length
+	req.HoldID = uuid.Nil
+	req.PaymentInfo = model.PaymentInfo{}
+}
+
+// resetNotificationRequest clears a notification request for reuse
+func resetNotificationRequest(req *model.NotificationRequest) {
+	req.Type = ""
+	req.RecipientEmail = ""
+	req.BookingData = model.NotificationBookingData{}
+	req.Timestamp = time.Time{}
+}
+
+// resetStatusUpdate clears a status update for reuse
+func resetStatusUpdate(update *model.BookingStatusUpdate) {
+	update.BookingID = uuid.Nil
+	update.Status = ""
+	update.Message = ""
+	update.UpdatedAt = time.Time{}
+}
 
 type BookingProcessor struct {
 	repo         repository.BookingRepository
@@ -195,10 +266,17 @@ func (p *BookingProcessor) reportMetrics(ctx context.Context) {
 	}
 }
 
-// processBooking handles individual booking requests
+// processBooking handles individual booking requests with object pooling
 func (p *BookingProcessor) processBooking(msg kafka.Message) error {
-	var bookingReq model.BookingRequest
-	if err := json.Unmarshal(msg.Value, &bookingReq); err != nil {
+	// Get pooled booking request object
+	bookingReq := bookingRequestPool.Get().(*model.BookingRequest)
+	defer func() {
+		resetBookingRequest(bookingReq)
+		bookingRequestPool.Put(bookingReq)
+	}()
+
+	// Unmarshal into pooled object
+	if err := json.Unmarshal(msg.Value, bookingReq); err != nil {
 		return fmt.Errorf("failed to unmarshal booking request: %w", err)
 	}
 
@@ -208,13 +286,13 @@ func (p *BookingProcessor) processBooking(msg kafka.Message) error {
 	p.updateBookingStatus(bookingReq.BookingID, "processing", "payment", "Processing payment...", nil, nil)
 
 	// Step 1: Simulate payment processing
-	if err := p.processPayment(bookingReq); err != nil {
+	if err := p.processPayment(*bookingReq); err != nil {
 		// Payment failed - release hold and mark booking as failed
 		p.eventService.ReleaseHold(bookingReq.HoldID)
 		failTime := time.Now()
 		errMsg := fmt.Sprintf("Payment failed: %s", err.Error())
 		p.updateBookingStatus(bookingReq.BookingID, "failed", "failed", errMsg, nil, &failTime)
-		p.sendNotification(bookingReq, "booking_failed", errMsg)
+		p.sendNotification(*bookingReq, "booking_failed", errMsg)
 		return err
 	}
 
@@ -224,7 +302,7 @@ func (p *BookingProcessor) processBooking(msg kafka.Message) error {
 		failTime := time.Now()
 		errMsg := fmt.Sprintf("Failed to confirm seats: %s", err.Error())
 		p.updateBookingStatus(bookingReq.BookingID, "failed", "refund_pending", errMsg, nil, &failTime)
-		p.sendNotification(bookingReq, "booking_failed", errMsg)
+		p.sendNotification(*bookingReq, "booking_failed", errMsg)
 		return err
 	}
 
@@ -233,7 +311,7 @@ func (p *BookingProcessor) processBooking(msg kafka.Message) error {
 	p.updateBookingStatus(bookingReq.BookingID, "confirmed", "completed", "Booking confirmed successfully", &confirmTime, nil)
 
 	// Step 4: Send confirmation notification
-	p.sendNotification(bookingReq, "booking_confirmed", "Your booking has been confirmed!")
+	p.sendNotification(*bookingReq, "booking_confirmed", "Your booking has been confirmed!")
 
 	log.Printf("Successfully processed booking: %s", bookingReq.BookingID)
 	return nil
@@ -296,27 +374,46 @@ func (p *BookingProcessor) updateBookingStatus(bookingID uuid.UUID, status, paym
 	}
 }
 
-// sendNotification sends notification to Kafka notification topic
+// sendNotification sends notification to Kafka notification topic with object pooling
 func (p *BookingProcessor) sendNotification(bookingReq model.BookingRequest, notificationType, message string) {
-	notification := model.NotificationRequest{
-		Type:           notificationType,
-		RecipientEmail: bookingReq.UserEmail,
-		BookingData: model.NotificationBookingData{
-			BookingID:   bookingReq.BookingID,
-			EventName:   bookingReq.EventName,
-			Venue:       bookingReq.Venue,
-			EventDate:   bookingReq.EventDate,
-			Seats:       bookingReq.Seats,
-			TotalAmount: bookingReq.PaymentInfo.Amount,
-			UserName:    bookingReq.UserName,
-		},
-		Timestamp: time.Now(),
+	// Get pooled notification request object
+	notification := notificationRequestPool.Get().(*model.NotificationRequest)
+	defer func() {
+		resetNotificationRequest(notification)
+		notificationRequestPool.Put(notification)
+	}()
+
+	// Get pooled JSON buffer
+	jsonBuffer := jsonBufferPool.Get().(*bytes.Buffer)
+	defer func() {
+		jsonBuffer.Reset()
+		jsonBufferPool.Put(jsonBuffer)
+	}()
+
+	// Populate notification
+	notification.Type = notificationType
+	notification.RecipientEmail = bookingReq.UserEmail
+	notification.BookingData = model.NotificationBookingData{
+		BookingID:   bookingReq.BookingID,
+		EventName:   bookingReq.EventName,
+		Venue:       bookingReq.Venue,
+		EventDate:   bookingReq.EventDate,
+		Seats:       bookingReq.Seats,
+		TotalAmount: bookingReq.PaymentInfo.Amount,
+		UserName:    bookingReq.UserName,
+	}
+	notification.Timestamp = time.Now()
+
+	// Encode using pooled buffer
+	encoder := json.NewEncoder(jsonBuffer)
+	if err := encoder.Encode(notification); err != nil {
+		log.Printf("Failed to encode notification: %v", err)
+		return
 	}
 
-	notificationBytes, _ := json.Marshal(notification)
 	p.kafkaWriter.WriteMessages(context.Background(),
 		kafka.Message{
 			Key:   []byte(bookingReq.BookingID.String()),
-			Value: notificationBytes,
+			Value: jsonBuffer.Bytes(),
 		})
 }
