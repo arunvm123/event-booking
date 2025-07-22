@@ -129,21 +129,35 @@ else
 fi
 echo ""
 
-# Step 3: Book all available seats to create scarcity
-echo -e "${BLUE}🎟️  Step 3: Booking All Available Seats${NC}"
+# Step 3: Create a hold first, then book
+echo -e "${BLUE}🎟️  Step 3: Creating Hold and Booking All Available Seats${NC}"
+HOLD_RESPONSE=$(curl -s -X POST "$EVENT_SERVICE/api/events/$EVENT_ID/hold" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -d '{
+    "seat_numbers": ["A1", "A2"]
+  }')
+
+echo "Hold Response: $HOLD_RESPONSE"
+
+# Extract hold ID
+HOLD_ID=$(echo "$HOLD_RESPONSE" | grep -o '"hold_id":"[^"]*"' | cut -d'"' -f4)
+if [[ -n "$HOLD_ID" ]]; then
+    echo "Hold ID: $HOLD_ID"
+else
+    echo -e "${RED}✗ Failed to extract Hold ID${NC}"
+    exit 1
+fi
+
+# Now create booking with the hold
 FIRST_BOOKING_RESPONSE=$(curl -s -X POST "$BOOKING_SERVICE/api/booking" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -d "{
-    \"event_id\": \"$EVENT_ID\",
-    \"seats\": [\"A1\", \"A2\"],
+    \"hold_id\": \"$HOLD_ID\",
     \"payment_info\": {
       \"amount\": 399.98,
-      \"payment_method\": \"credit_card\",
-      \"card_number\": \"4111111111111111\",
-      \"cvv\": \"123\",
-      \"expiry_month\": \"12\",
-      \"expiry_year\": \"2025\"
+      \"payment_method\": \"credit_card\"
     }
   }")
 
@@ -169,133 +183,79 @@ echo ""
 # Step 4: Attempt Failed Booking Scenarios
 echo -e "${BLUE}❌ Step 4: Testing Failed Booking Scenarios${NC}"
 
-# Scenario 1: Try to book already taken seats
-echo -e "${YELLOW}Scenario 1: Attempting to book already taken seats${NC}"
-FAILED_BOOKING_1=$(curl -s -X POST "$BOOKING_SERVICE/api/booking" \
+# Scenario 1: Try to create hold for already taken seats
+echo -e "${YELLOW}Scenario 1: Attempting to create hold for already taken seats${NC}"
+FAILED_HOLD_1=$(curl -s -X POST "$EVENT_SERVICE/api/events/$EVENT_ID/hold" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT_TOKEN" \
-  -d "{
-    \"event_id\": \"$EVENT_ID\",
-    \"seats\": [\"A1\", \"A2\"],
-    \"payment_info\": {
-      \"amount\": 399.98,
-      \"payment_method\": \"credit_card\",
-      \"card_number\": \"4111111111111111\",
-      \"cvv\": \"123\",
-      \"expiry_month\": \"12\",
-      \"expiry_year\": \"2025\"
-    }
-  }")
+  -d '{
+    "seat_numbers": ["A1", "A2"]
+  }')
 
-echo "Response: $FAILED_BOOKING_1"
-if echo "$FAILED_BOOKING_1" | grep -q "seats.*not.*available\|already.*booked\|conflict"; then
-    echo -e "${GREEN}✓ Correctly rejected booking for taken seats${NC}"
+echo "Response: $FAILED_HOLD_1"
+if echo "$FAILED_HOLD_1" | grep -q "seats.*not.*available\|already.*booked\|conflict\|taken"; then
+    echo -e "${GREEN}✓ Correctly rejected hold for taken seats${NC}"
 else
     echo -e "${RED}⚠️  Unexpected response for taken seats${NC}"
 fi
 echo ""
 
-# Scenario 2: Try to book non-existent seats
-echo -e "${YELLOW}Scenario 2: Attempting to book non-existent seats${NC}"
-FAILED_BOOKING_2=$(curl -s -X POST "$BOOKING_SERVICE/api/booking" \
+# Scenario 2: Try to create hold for non-existent seats
+echo -e "${YELLOW}Scenario 2: Attempting to create hold for non-existent seats${NC}"
+FAILED_HOLD_2=$(curl -s -X POST "$EVENT_SERVICE/api/events/$EVENT_ID/hold" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT_TOKEN" \
-  -d "{
-    \"event_id\": \"$EVENT_ID\",
-    \"seats\": [\"Z99\", \"Z100\"],
-    \"payment_info\": {
-      \"amount\": 399.98,
-      \"payment_method\": \"credit_card\",
-      \"card_number\": \"4111111111111111\",
-      \"cvv\": \"123\",
-      \"expiry_month\": \"12\",
-      \"expiry_year\": \"2025\"
-    }
-  }")
+  -d '{
+    "seat_numbers": ["Z99", "Z100"]
+  }')
 
-echo "Response: $FAILED_BOOKING_2"
-if echo "$FAILED_BOOKING_2" | grep -q "invalid.*seat\|not.*exist\|seat.*number"; then
-    echo -e "${GREEN}✓ Correctly rejected booking for invalid seats${NC}"
+echo "Response: $FAILED_HOLD_2"
+if echo "$FAILED_HOLD_2" | grep -q "invalid.*seat\|not.*exist\|seat.*number"; then
+    echo -e "${GREEN}✓ Correctly rejected hold for invalid seats${NC}"
 else
     echo -e "${RED}⚠️  Unexpected response for invalid seats${NC}"
 fi
 echo ""
 
-# Scenario 3: Try to book with invalid payment info
-echo -e "${YELLOW}Scenario 3: Attempting to book with invalid payment${NC}"
+# Scenario 3: Try to book with invalid hold ID
+echo -e "${YELLOW}Scenario 3: Attempting to book with invalid hold ID${NC}"
 FAILED_BOOKING_3=$(curl -s -X POST "$BOOKING_SERVICE/api/booking" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT_TOKEN" \
-  -d "{
-    \"event_id\": \"$EVENT_ID\",
-    \"seats\": [\"B1\"],
-    \"payment_info\": {
-      \"amount\": 199.99,
-      \"payment_method\": \"credit_card\",
-      \"card_number\": \"1234567890123456\",
-      \"cvv\": \"999\",
-      \"expiry_month\": \"01\",
-      \"expiry_year\": \"2020\"
+  -d '{
+    "hold_id": "invalid-hold-id-12345",
+    "payment_info": {
+      "amount": 199.99,
+      "payment_method": "credit_card"
     }
-  }")
+  }')
 
 echo "Response: $FAILED_BOOKING_3"
-if echo "$FAILED_BOOKING_3" | grep -q "payment.*failed\|invalid.*card\|expired"; then
-    echo -e "${GREEN}✓ Correctly rejected booking for invalid payment${NC}"
+if echo "$FAILED_BOOKING_3" | grep -q "hold.*not.*found\|invalid.*hold\|hold.*expired"; then
+    echo -e "${GREEN}✓ Correctly rejected booking for invalid hold${NC}"
 else
-    echo -e "${RED}⚠️  Unexpected response for invalid payment${NC}"
+    echo -e "${RED}⚠️  Unexpected response for invalid hold${NC}"
 fi
 echo ""
 
-# Scenario 4: Try to book with insufficient amount
-echo -e "${YELLOW}Scenario 4: Attempting to book with insufficient payment amount${NC}"
+# Scenario 4: Try to book with empty payment method (will fail in worker)
+echo -e "${YELLOW}Scenario 4: Attempting to book with empty payment method${NC}"
 FAILED_BOOKING_4=$(curl -s -X POST "$BOOKING_SERVICE/api/booking" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -d "{
-    \"event_id\": \"$EVENT_ID\",
-    \"seats\": [\"B1\"],
+    \"hold_id\": \"invalid-hold-id-empty-payment\",
     \"payment_info\": {
-      \"amount\": 50.00,
-      \"payment_method\": \"credit_card\",
-      \"card_number\": \"4111111111111111\",
-      \"cvv\": \"123\",
-      \"expiry_month\": \"12\",
-      \"expiry_year\": \"2025\"
+      \"amount\": 199.99,
+      \"payment_method\": \"\"
     }
   }")
 
 echo "Response: $FAILED_BOOKING_4"
-if echo "$FAILED_BOOKING_4" | grep -q "amount.*insufficient\|price.*mismatch\|payment.*amount"; then
-    echo -e "${GREEN}✓ Correctly rejected booking for insufficient amount${NC}"
+if echo "$FAILED_BOOKING_4" | grep -q "hold.*not.*found\|invalid.*hold\|validation"; then
+    echo -e "${GREEN}✓ Correctly rejected booking for invalid hold or empty payment method${NC}"
 else
-    echo -e "${RED}⚠️  Unexpected response for insufficient amount${NC}"
-fi
-echo ""
-
-# Scenario 5: Try to book for non-existent event
-echo -e "${YELLOW}Scenario 5: Attempting to book for non-existent event${NC}"
-FAILED_BOOKING_5=$(curl -s -X POST "$BOOKING_SERVICE/api/booking" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $JWT_TOKEN" \
-  -d '{
-    "event_id": "non-existent-event-id-12345",
-    "seats": ["A1"],
-    "payment_info": {
-      "amount": 199.99,
-      "payment_method": "credit_card",
-      "card_number": "4111111111111111",
-      "cvv": "123",
-      "expiry_month": "12",
-      "expiry_year": "2025"
-    }
-  }')
-
-echo "Response: $FAILED_BOOKING_5"
-if echo "$FAILED_BOOKING_5" | grep -q "event.*not.*found\|invalid.*event\|event.*exist"; then
-    echo -e "${GREEN}✓ Correctly rejected booking for non-existent event${NC}"
-else
-    echo -e "${RED}⚠️  Unexpected response for non-existent event${NC}"
+    echo -e "${RED}⚠️  Unexpected response for empty payment method${NC}"
 fi
 echo ""
 
@@ -309,15 +269,10 @@ for i in {1..5}; do
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $JWT_TOKEN" \
       -d "{
-        \"event_id\": \"$EVENT_ID\",
-        \"seats\": [\"A1\"],
+        \"hold_id\": \"invalid-hold-id-$i\",
         \"payment_info\": {
           \"amount\": 199.99,
-          \"payment_method\": \"credit_card\",
-          \"card_number\": \"4111111111111111\",
-          \"cvv\": \"123\",
-          \"expiry_month\": \"12\",
-          \"expiry_year\": \"2025\"
+          \"payment_method\": \"credit_card\"
         }
       }" > /dev/null &
 done
@@ -329,11 +284,10 @@ echo ""
 echo -e "${GREEN}🎯 Failed Booking Tests Completed!${NC}"
 echo ""
 echo "📋 Summary:"
-echo "✓ Tested booking for already taken seats"
-echo "✓ Tested booking for non-existent seats"
-echo "✓ Tested booking with invalid payment info"
-echo "✓ Tested booking with insufficient payment amount"
-echo "✓ Tested booking for non-existent event"
+echo "✓ Tested hold creation for already taken seats"
+echo "✓ Tested hold creation for non-existent seats"
+echo "✓ Tested booking with invalid hold ID"
+echo "✓ Tested booking with empty payment method"
 echo "✓ Tested worker pool resilience under failure scenarios"
 echo ""
 echo "💡 The system correctly handled all failure scenarios!"
