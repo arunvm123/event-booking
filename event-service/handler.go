@@ -271,10 +271,18 @@ func (h *EventHandler) HoldSeats(c *gin.Context) {
 	// Create hold
 	hold, err := h.repo.CreateHold(holdReq)
 	if err != nil {
-		if err.Error() == "seats not available" {
+		errorMessage := err.Error()
+		if errorMessage == "seats not available" {
 			c.JSON(http.StatusConflict, model.ErrorResponse{
 				Error:   "seats_unavailable",
 				Message: "Some requested seats are not available",
+			})
+			return
+		}
+		if len(errorMessage) > 25 && errorMessage[:25] == "seat numbers do not exist" {
+			c.JSON(http.StatusBadRequest, model.ErrorResponse{
+				Error:   "invalid_seats",
+				Message: errorMessage,
 			})
 			return
 		}

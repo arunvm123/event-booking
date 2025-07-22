@@ -211,6 +211,38 @@ func (r *PostgresEventRepository) CheckSeatsAvailability(eventID string, seatNum
 	return nil
 }
 
+// CheckSeatsExist validates that all requested seat numbers exist for the given event
+func (r *PostgresEventRepository) CheckSeatsExist(eventID string, seatNumbers []string) error {
+	var existingSeats []string
+	query := `
+		SELECT seat_number FROM seats 
+		WHERE event_id = ? AND seat_number = ANY(?)
+	`
+	if err := r.db.Raw(query, eventID, pq.Array(seatNumbers)).Scan(&existingSeats).Error; err != nil {
+		return fmt.Errorf("failed to check seat existence: %w", err)
+	}
+
+	// Check if all requested seats exist
+	if len(existingSeats) != len(seatNumbers) {
+		// Find which seats don't exist
+		existingSet := make(map[string]bool)
+		for _, seat := range existingSeats {
+			existingSet[seat] = true
+		}
+
+		var nonExistentSeats []string
+		for _, seat := range seatNumbers {
+			if !existingSet[seat] {
+				nonExistentSeats = append(nonExistentSeats, seat)
+			}
+		}
+
+		return fmt.Errorf("seat numbers do not exist: %v", nonExistentSeats)
+	}
+
+	return nil
+}
+
 // Hold operations
 func (r *PostgresEventRepository) CreateHold(req model.CreateHoldRequest) (*model.Hold, error) {
 	tx := r.db.Begin()
@@ -220,8 +252,15 @@ func (r *PostgresEventRepository) CreateHold(req model.CreateHoldRequest) (*mode
 		}
 	}()
 
-	// Check seat availability
-	err := r.CheckSeatsAvailability(req.EventID, req.SeatNumbers)
+	// First check if seats exist
+	err := r.CheckSeatsExist(req.EventID, req.SeatNumbers)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+
+	// Then check seat availability
+	err = r.CheckSeatsAvailability(req.EventID, req.SeatNumbers)
 	if err != nil {
 		tx.Rollback()
 		return nil, err

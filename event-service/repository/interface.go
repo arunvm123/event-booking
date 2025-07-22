@@ -14,10 +14,11 @@ type EventRepository interface {
 	ListEvents(filter model.EventFilter) ([]model.Event, int, error)
 
 	// Seat operations
+	GetAvailableSeats(eventID string) ([]string, error)
 	GetAvailableSeatCount(eventID string) (int, error)
 	GetAvailableSeatNumbers(eventID string) ([]string, error)
-	GetAvailableSeats(eventID string) ([]string, error)
 	CheckSeatsAvailability(eventID string, seatNumbers []string) error
+	CheckSeatsExist(eventID string, seatNumbers []string) error
 
 	// Hold operations
 	CreateHold(req model.CreateHoldRequest) (*model.Hold, error)
