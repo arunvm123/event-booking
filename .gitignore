@@ -1,2 +1,14 @@
 **/config.yaml
 implementation.md
+
+# Pulumi - Security and temporary files
+pulumi/node_modules/
+pulumi/.pulumi/
+pulumi/Pulumi.*.yaml
+!pulumi/Pulumi.yaml
+pulumi/kubeconfig.yaml
+pulumi/*.log
+pulumi/.env
+pulumi/.env.*
+pulumi/secrets/
+pulumi/bin/
