@@ -7,8 +7,9 @@ import { Rate, Counter, Trend } from 'k6/metrics';
 const CONFIG = {
   TARGET_RPS: 10,              // Booking submissions per second
   TEST_DURATION: '60s',        // How long to run the test
-  SEATS_PER_EVENT: 1000000,       // Seats per event (matching test script)
-  SETUP_EVENTS_COUNT: 1,       // Events to pre-create
+  SEATS_PER_EVENT: 50000,      // 50k seats per event (plenty for no conflicts)
+  SETUP_USERS_COUNT: 20,       // 20 users, each mapped to their own event
+  SETUP_EVENTS_COUNT: 20,      // 20 events, one per user
 };
 
 // Service URLs
@@ -83,8 +84,8 @@ export function setup() {
   }
   
   // Create test users
-  console.log(`👥 Creating ${CONFIG.SETUP_EVENTS_COUNT * 2} test users...`);
-  for (let i = 0; i < CONFIG.SETUP_EVENTS_COUNT * 2; i++) {
+  console.log(`👥 Creating ${CONFIG.SETUP_USERS_COUNT} test users...`);
+  for (let i = 0; i < CONFIG.SETUP_USERS_COUNT; i++) {
     const timestamp = Date.now();
     const randomId = Math.random().toString(36).substring(7);
     const email = `testuser.${timestamp}.${randomId}@loadtest.com`;
@@ -114,6 +115,7 @@ export function setup() {
         const token = loginData.access_token;
         
         testUsers.push({
+          id: i,  // User ID for mapping to event
           email: email,
           password: password,
           token: token,
@@ -132,22 +134,22 @@ export function setup() {
     throw new Error('No test users created successfully');
   }
   
-  // Create test events
-  console.log(`🎪 Creating ${CONFIG.SETUP_EVENTS_COUNT} test events...`);
+  // Create test events - one per user
+  console.log(`🎪 Creating ${CONFIG.SETUP_EVENTS_COUNT} test events (one per user)...`);
   for (let i = 0; i < CONFIG.SETUP_EVENTS_COUNT; i++) {
-    const userToken = testUsers[i % testUsers.length].token;
+    const userToken = testUsers[i].token;  // Use the corresponding user's token
     const eventDate = new Date();
     eventDate.setDate(eventDate.getDate() + 30); // 30 days from now
     
     const eventResponse = http.post(`${EVENT_SERVICE}/api/events`, JSON.stringify({
-      name: `Load Test Concert ${i + 1}`,
+      name: `Load Test Concert ${i + 1} - User ${i + 1} Exclusive`,
       venue: `Test Venue ${i + 1}`,
       city: 'Load Test City',
       category: 'Music',
       event_date: eventDate.toISOString(),
       total_seats: CONFIG.SEATS_PER_EVENT,
       price_per_seat: 99.99,
-      description: `Load test event ${i + 1}`,
+      description: `Load test event ${i + 1} - dedicated for user ${i + 1}`,
     }), {
       headers: {
         'Content-Type': 'application/json',
@@ -158,13 +160,15 @@ export function setup() {
     if (eventResponse.status === 201 || eventResponse.status === 200) {
       const eventData = JSON.parse(eventResponse.body);
       testEvents.push({
+        id: i,  // Event ID for mapping to user
         event_id: eventData.event_id,
         name: eventData.name,
         venue: eventData.venue,
         total_seats: CONFIG.SEATS_PER_EVENT,
+        assigned_user_id: i,  // Map this event to user i
       });
       
-      console.log(`✅ Created event ${i + 1}: ${eventData.event_id}`);
+      console.log(`✅ Created event ${i + 1}: ${eventData.event_id} (assigned to user ${i + 1})`);
     } else {
       console.log(`❌ Failed to create event ${i + 1}: Status ${eventResponse.status}`);
     }
@@ -174,37 +178,93 @@ export function setup() {
     throw new Error('No test events created successfully');
   }
   
-  // Pre-allocate seat combinations to avoid overlaps during load testing
-  console.log('🎟️ Pre-allocating seat combinations to avoid overlaps...');
-  const seatCombinations = generateSeatCombinations();
-  console.log(`✅ Generated ${seatCombinations.length} unique seat combinations`);
+  // No need for complex seat allocation - with 50k seats per event, we can use simple sequential allocation
+  console.log('🎟️ Seat allocation strategy: Sequential allocation (no conflicts with 50k seats per event)');
   
-  console.log(`🎯 Setup complete: ${testUsers.length} users, ${testEvents.length} events, ${seatCombinations.length} seat combinations`);
+  console.log(`\n🎯 Setup complete:`);
+  console.log(`   • ${testUsers.length} users created`);
+  console.log(`   • ${testEvents.length} events created (one per user)`);
+  console.log(`   • ${CONFIG.SEATS_PER_EVENT.toLocaleString()} seats per event`);
+  console.log(`   • User-Event mapping: Each user is assigned to their corresponding event`);
   console.log('🚀 Starting load test...\n');
   
   return {
     users: testUsers,
     events: testEvents,
-    seatCombinations: seatCombinations,
+    userEventMap: createUserEventMap(testUsers, testEvents),
     startTime: Date.now(),
   };
 }
 
+// Helper function to create user-event mapping
+function createUserEventMap(users, events) {
+  const map = {};
+  users.forEach((user, index) => {
+    if (events[index]) {
+      map[user.id] = events[index];
+    }
+  });
+  return map;
+}
+
 export default function (data) {
-  // Select random user and event
-  const user = data.users[Math.floor(Math.random() * data.users.length)];
-  const event = data.events[Math.floor(Math.random() * data.events.length)];
-  
-  // Better seat selection - use modulo to cycle through combinations
+  // Use round-robin to select user based on VU and iteration
   const vuId = __VU;
   const iterationId = __ITER;
+  const userIndex = (vuId - 1 + iterationId) % data.users.length;
   
-  // Calculate a unique index that cycles through available combinations
-  const seatComboIndex = (vuId * 1000 + iterationId) % data.seatCombinations.length;
-  const seatNumbers = data.seatCombinations[seatComboIndex];
+  const user = data.users[userIndex];
+  const event = data.userEventMap[user.id]; // Get the event assigned to this user
   
-  // Debug: Log the seat combination being used
-  console.log(`🎟️ VU ${vuId}, Iteration ${iterationId}: Using seats [${seatNumbers.join(', ')}] for event ${event.event_id}`);
+  if (!event) {
+    console.error(`❌ No event found for user ${user.id}`);
+    return;
+  }
+  
+  // Generate unique sequential seats for this booking
+  // With 50k seats, we can safely allocate seats without conflicts
+  const uniqueOffset = (vuId * 1000) + (iterationId * 2); // Ensure uniqueness across VUs
+  const seatStartNumber = uniqueOffset + 1; // Each booking gets 2 seats
+  
+  // Simple seat naming: Row A-Z, then AA-AZ, etc. (UPDATED: 500 seats per row)
+  const rowNumber = Math.floor((seatStartNumber - 1) / 500); // 500 seats per row to match updated DB
+  
+  // Generate row name using EXACT same logic as Go code
+  function generateRowName(index) {
+    let result = '';
+    while (true) {
+      result = String.fromCharCode(65 + (index % 26)) + result;
+      index = Math.floor(index / 26);
+      if (index === 0) break;
+      index--; // Adjust for the fact that there's no "zero" letter
+    }
+    return result;
+  }
+  
+  const rowLetter = generateRowName(rowNumber);
+  
+  const seatInRow = ((seatStartNumber - 1) % 500) + 1; // Seats 1-500 per row
+  
+  // Make sure we don't exceed row capacity
+  const seatNumbers = seatInRow <= 499 ? [
+    `${rowLetter}${seatInRow}`,
+    `${rowLetter}${seatInRow + 1}`
+  ] : [
+    `${rowLetter}${500}`, // Last seat in current row
+    `A1` // First seat in row A (simple fallback)
+  ];
+  
+  // Validate seat numbers before attempting to book
+  const maxSeatNumber = Math.max(...seatNumbers.map(seat => {
+    const match = seat.match(/[A-Z]+(\d+)/);
+    return match ? parseInt(match[1]) : 0;
+  }));
+  if (maxSeatNumber > 500) {
+    console.log(`⚠️ Invalid seat numbers [${seatNumbers.join(', ')}] - max seat per row is 500, got ${maxSeatNumber}`);
+    return;
+  }
+  
+  console.log(`🎟️ User ${user.id} (VU${vuId}:${iterationId}) booking seats [${seatNumbers.join(', ')}] for event ${event.event_id}`);
   
   // Step 1: Create seat hold
   const holdStartTime = Date.now();
@@ -234,14 +294,22 @@ export default function (data) {
   });
   
   if (!holdSuccess) {
-    console.log(`❌ Hold creation failed: Status ${holdResponse.status}, Body: ${holdResponse.body}`);
-    try {
-      const errorBody = JSON.parse(holdResponse.body);
-      if (errorBody.error && errorBody.error.includes('already held')) {
-        seatsAlreadyHeld.add(1);
+    console.log(`❌ Hold creation failed for user ${user.id} (VU${vuId}:${iterationId}): Status ${holdResponse.status}`);
+    console.log(`   Requested seats: [${seatNumbers.join(', ')}]`);
+    console.log(`   Event ID: ${event.event_id}`);
+    console.log(`   Response: ${holdResponse.body}`);
+    
+    // Try to get available seats to debug
+    const availableSeatsResponse = http.get(`${EVENT_SERVICE}/api/events/${event.event_id}`, {
+      headers: { 'Authorization': `Bearer ${user.token}` },
+    });
+    
+    if (availableSeatsResponse.status === 200) {
+      const eventData = JSON.parse(availableSeatsResponse.body);
+      console.log(`   Available seats in event: ${eventData.available_seats}`);
+      if (eventData.available_seat_numbers && eventData.available_seat_numbers.length > 0) {
+        console.log(`   First 10 available: [${eventData.available_seat_numbers.slice(0, 10).join(', ')}]`);
       }
-    } catch {
-      // Error parsing error response
     }
     return;
   }
@@ -293,14 +361,14 @@ export default function (data) {
   });
   
   if (!bookingSubmitSuccess) {
-    console.log(`❌ Booking submission failed: Status ${bookingResponse.status}, Body: ${bookingResponse.body}`);
+    console.log(`❌ Booking submission failed for user ${user.id}: Status ${bookingResponse.status}, Body: ${bookingResponse.body}`);
     failedBookings.add(1);
     bookingSuccessRate.add(0);
     return;
   }
   
   const bookingData = JSON.parse(bookingResponse.body);
-  const bookingId = bookingData.booking_id;
+  const createdBookingId = bookingData.booking_id;  // Changed variable name to avoid redeclaration
   const pollingStartTime = Date.now();
   
   // Step 3: Poll for final status
@@ -315,7 +383,7 @@ export default function (data) {
       sleep(2);
     }
     
-    const statusResponse = http.get(`${BOOKING_SERVICE}/api/booking/${bookingId}/status`, {
+    const statusResponse = http.get(`${BOOKING_SERVICE}/api/booking/${createdBookingId}/status`, {
       headers: {
         'Authorization': `Bearer ${user.token}`,
       },
@@ -332,7 +400,7 @@ export default function (data) {
         
         // Log status transitions
         if (pollAttempts === 0 || finalStatus !== 'processing') {
-          console.log(`📊 Booking ${bookingId}: ${finalStatus} (attempt ${pollAttempts + 1})`);
+          console.log(`📊 Booking ${createdBookingId}: ${finalStatus} (attempt ${pollAttempts + 1})`);
         }
       } catch (e) {
         console.error(`Failed to parse status response: ${statusResponse.body}`);
@@ -352,87 +420,22 @@ export default function (data) {
   if (finalStatus === 'confirmed') {
     successfulBookings.add(1);
     bookingSuccessRate.add(1);
-    console.log(`✅ Booking ${bookingId} confirmed in ${totalProcessingTime}ms`);
+    console.log(`✅ Booking ${createdBookingId} confirmed in ${totalProcessingTime}ms`);
   } else if (finalStatus === 'failed') {
     failedBookings.add(1);
     bookingSuccessRate.add(0);
     const errorMsg = lastStatusResponse?.error_message || 'Unknown error';
-    console.log(`❌ Booking ${bookingId} failed: ${errorMsg}`);
+    console.log(`❌ Booking ${createdBookingId} failed: ${errorMsg}`);
   } else {
     // Still processing after max attempts
     bookingTimeouts.add(1);
     bookingSuccessRate.add(0);
-    console.log(`⏱️ Booking ${bookingId} timed out after ${maxPolls * 2} seconds`);
+    console.log(`⏱️ Booking ${createdBookingId} timed out after ${maxPolls * 2} seconds`);
   }
 }
 
-// Generate non-overlapping seat combinations for load testing
-function generateSeatCombinations() {
-  const combinations = [];
-  
-  // Calculate estimated number of booking requests during test
-  const testDurationSeconds = parseInt(CONFIG.TEST_DURATION.replace('s', ''));
-  const estimatedRequests = CONFIG.TARGET_RPS * testDurationSeconds;
-  const maxVUs = 50; // From options
-  const bufferMultiplier = 2.0; // Increased buffer for VU distribution
-  const targetCombinations = Math.floor(estimatedRequests * bufferMultiplier);
-  
-  console.log(`🧮 Generating seat combinations:`);
-  console.log(`   • Test duration: ${testDurationSeconds}s`);
-  console.log(`   • Target RPS: ${CONFIG.TARGET_RPS}`);
-  console.log(`   • Estimated requests: ${estimatedRequests}`);
-  console.log(`   • Target combinations (with ${bufferMultiplier}x buffer): ${targetCombinations}`);
-  
-  // Calculate how many rows we have (1000 seats / 50 seats per row = 20 rows)
-  const totalRows = Math.ceil(CONFIG.SEATS_PER_EVENT / 50);
-  console.log(`   • Total rows available: ${totalRows} (A to ${String.fromCharCode(64 + totalRows)})`);
-  
-  // Generate combinations using multiple strategies to ensure uniqueness
-  let generatedCount = 0;
-  
-  // Strategy 1: Sequential pairs (A1-A2, A3-A4, etc.)
-  for (let row = 0; row < totalRows && generatedCount < targetCombinations; row++) {
-    const rowLetter = String.fromCharCode(65 + row); // A, B, C...
-    
-    for (let seatStart = 1; seatStart <= 49 && generatedCount < targetCombinations; seatStart += 2) {
-      combinations.push([
-        `${rowLetter}${seatStart}`,
-        `${rowLetter}${seatStart + 1}`
-      ]);
-      generatedCount++;
-    }
-  }
-  
-  // Strategy 2: If we need more, use non-adjacent seats
-  if (generatedCount < targetCombinations) {
-    for (let row = 0; row < totalRows && generatedCount < targetCombinations; row++) {
-      const rowLetter = String.fromCharCode(65 + row);
-      
-      for (let gap = 2; gap <= 25 && generatedCount < targetCombinations; gap++) {
-        for (let seatStart = 1; seatStart + gap <= 50 && generatedCount < targetCombinations; seatStart++) {
-          combinations.push([
-            `${rowLetter}${seatStart}`,
-            `${rowLetter}${seatStart + gap}`
-          ]);
-          generatedCount++;
-        }
-      }
-    }
-  }
-  
-  console.log(`   • Generated ${combinations.length} unique seat combinations`);
-  console.log(`   • Combinations per VU: ~${Math.floor(combinations.length / maxVUs)}`);
-  console.log(`   • First combination: [${combinations[0].join(', ')}]`);
-  console.log(`   • Last combination: [${combinations[combinations.length - 1].join(', ')}]`);
-  
-  // Shuffle to distribute evenly across VUs
-  for (let i = combinations.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [combinations[i], combinations[j]] = [combinations[j], combinations[i]];
-  }
-  
-  return combinations;
-}
+// No longer need complex seat generation function
+// With 50k seats per event and user-event mapping, conflicts are virtually impossible
 
 export function teardown(data) {
   const testDurationMs = Date.now() - data.startTime;
@@ -443,8 +446,16 @@ export function teardown(data) {
   console.log(`🎯 Target RPS: ${CONFIG.TARGET_RPS}`);
   console.log(`⏱️  Test Duration: ${testDurationSeconds.toFixed(2)} seconds`);
   console.log(`👥 Test Users: ${data.users.length}`);
-  console.log(`🎪 Test Events: ${data.events.length}`);
-  console.log(`🎟️ Seat Combinations Used: ${data.seatCombinations.length}`);
+  console.log(`🎪 Test Events: ${data.events.length} (one per user)`);
+  console.log(`🎟️ Seats per Event: ${CONFIG.SEATS_PER_EVENT.toLocaleString()}`);
+  console.log('');
+  console.log('📊 User-Event Mapping:');
+  data.users.forEach((user, index) => {
+    const event = data.events[index];
+    if (event) {
+      console.log(`   • User ${user.id} → Event ${event.event_id.substring(0, 8)}...`);
+    }
+  });
   console.log('');
   console.log('📈 Key Metrics to Review:');
   console.log('   • booking_submissions: Total booking attempts');
@@ -454,14 +465,14 @@ export function teardown(data) {
   console.log('   • status_check_time: Status check response times (target: p95 <1s)');
   console.log('   • final_confirmation_time: Time to reach final status (target: p95 <30s)');
   console.log('   • booking_timeouts: Bookings that didn\'t complete in time');
-  console.log('   • seats_already_held: Conflicts due to seat availability');
   console.log('');
   console.log('🎯 Expected Results:');
+  console.log('   • NO seat conflicts (each user has their own event with 50k seats)');
   console.log('   • Booking submissions should be <5s (95th percentile)');
   console.log('   • Status checks should be <1s (95th percentile)');
   console.log('   • Final confirmation should be <30s (95th percentile)');
-  console.log('   • Success rate should be >80%');
-  console.log('   • HTTP error rate should be <10%');
+  console.log('   • Success rate should be >95% (higher due to no conflicts)');
+  console.log('   • HTTP error rate should be <5%');
   console.log('');
   console.log('✅ Booking flow load test completed!');
 }
