@@ -111,6 +111,33 @@ The system consists of four core microservices:
 ./logs.sh [service-name]  # Optional: specify user, event, booking, or notification
 ```
 
+### 4. Load Testing with k6
+Test your service's performance and capacity:
+
+```bash
+# Install k6 (if not already installed)
+brew install k6  # macOS
+
+# Run RPS load test (edit TARGET_RPS in the script first)
+k6 run scripts/load-test-rps.js
+```
+
+**Available Scripts:**
+- `scripts/load-test-rps.js` - k6 script for RPS (requests per second) load testing
+- `scripts/README.md` - Load testing documentation and usage guide
+
+### 5. Database & Infrastructure Debugging
+```bash
+# Connect to PostgreSQL database
+./connect-db.sh
+
+# Connect to Redis cache
+./connect-redis.sh
+
+# Connect to Kafka for message inspection
+./connect-kafka.sh list
+```
+
 ## 📚 API Documentation
 
 ### User Service (Port 8081)
@@ -160,10 +187,16 @@ event-booking/
 ├── event-service/          # Event and seat management
 ├── booking-service/        # Booking processing and payments
 ├── notification-service/   # Email and SMS notifications
+├── scripts/               # Load testing tools
+│   ├── load-test-rps.js   # k6 RPS load testing script
+│   └── README.md          # Load testing documentation
 ├── docker-compose.yml      # Infrastructure definition
 ├── start-dev.sh           # Development startup script
 ├── stop-dev.sh            # Cleanup script
 ├── logs.sh                # Log monitoring script
+├── connect-db.sh          # PostgreSQL connection script
+├── connect-redis.sh       # Redis connection script
+├── connect-kafka.sh       # Kafka connection script
 ├── test-successful-booking.sh  # Integration tests
 └── test-failed-booking.sh      # Error scenario tests
 ```
