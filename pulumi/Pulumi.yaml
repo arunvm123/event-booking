@@ -1,0 +1,9 @@
+name: event-booking
+runtime: go
+description: Event booking application deployment on DigitalOcean with managed services
+template:
+  config:
+    pulumi:tags:
+      value:
+        project: event-booking
+        environment: production

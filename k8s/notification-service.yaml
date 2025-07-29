@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service-api
+  namespace: event-booking
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: notification-service-api
+  template:
+    metadata:
+      labels:
+        app: notification-service-api
+    spec:
+      containers:
+      - name: notification-service-api
+        image: registry.digitalocean.com/event-booking-registry/notification-service-api:latest
+        ports:
+        - containerPort: 8084
+        env:
+        - name: PORT
+          value: "8084"
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: event-booking-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: event-booking-config
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: event-booking-config
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: event-booking-config
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: event-booking-secret
+              key: DB_PASSWORD
+        - name: DB_SSL_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: event-booking-config
+              key: DB_SSL_MODE
+        - name: KAFKA_BROKERS
+          valueFrom:
+            configMapKeyRef:
+              name: event-booking-config
+              key: KAFKA_BROKERS
+        - name: KAFKA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: event-booking-secret
+              key: KAFKA_PASSWORD
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8084
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8084
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  namespace: event-booking
+spec:
+  selector:
+    app: notification-service-api
+  ports:
+  - port: 80
+    targetPort: 8084
+  type: ClusterIP
