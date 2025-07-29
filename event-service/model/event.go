@@ -144,7 +144,7 @@ type CreateEventAPIRequest struct {
 	City         string    `json:"city" binding:"required"`
 	Category     string    `json:"category" binding:"required"`
 	EventDate    time.Time `json:"event_date" binding:"required"`
-	TotalSeats   int       `json:"total_seats" binding:"required,min=1,max=10000"`
+	TotalSeats   int       `json:"total_seats" binding:"required,min=1,max=1000000"`
 	PricePerSeat float64   `json:"price_per_seat" binding:"required,min=0.01"`
 }
 

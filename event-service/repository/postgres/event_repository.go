@@ -431,15 +431,19 @@ func (r *PostgresEventRepository) GetDB() *gorm.DB {
 }
 
 // Helper function to generate seats
+// Pattern: A1-A500, B1-B500, ..., Z1-Z500, AA1-AA500, AB1-AB500, etc.
 func (r *PostgresEventRepository) generateSeats(eventID string, totalSeats int) []model.Seat {
 	var seats []model.Seat
 	seatCount := 0
-	row := 'A'
+	rowIndex := 0
 
 	for seatCount < totalSeats {
 		seatNum := 1
-		for seatNum <= 50 && seatCount < totalSeats { // Max 50 seats per row
-			seatNumber := fmt.Sprintf("%c%d", row, seatNum)
+		rowName := generateRowName(rowIndex)
+
+		// Generate up to 500 seats per row (configurable)
+		for seatNum <= 500 && seatCount < totalSeats {
+			seatNumber := fmt.Sprintf("%s%d", rowName, seatNum)
 			seats = append(seats, model.Seat{
 				ID:         uuid.New().String(),
 				EventID:    eventID,
@@ -449,10 +453,27 @@ func (r *PostgresEventRepository) generateSeats(eventID string, totalSeats int) 
 			seatNum++
 			seatCount++
 		}
-		row++
+		rowIndex++
 	}
 
 	return seats
+}
+
+// generateRowName converts row index to Excel-style column names
+// 0 -> A, 1 -> B, ..., 25 -> Z, 26 -> AA, 27 -> AB, etc.
+func generateRowName(index int) string {
+	result := ""
+
+	for {
+		result = string(rune('A'+(index%26))) + result
+		index = index / 26
+		if index == 0 {
+			break
+		}
+		index-- // Adjust for the fact that there's no "zero" letter
+	}
+
+	return result
 }
 
 // createPerformanceIndexes creates critical indexes for high-performance operations
